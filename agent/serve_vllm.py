@@ -9,6 +9,7 @@ This follows Modal's vLLM example; only the app name, --max-logprobs and the HF 
 from __future__ import annotations
 
 import json
+import os
 
 import modal
 
@@ -36,13 +37,16 @@ app = modal.App("kwtc-vllm")
 
 FAST_BOOT = False
 N_GPU = 1
+# The bf16 weights (~52 GB) need an 80 GB-class card: H200 (default), H100 or A100-80GB.
+#   KWTC_VLLM_GPU=H100 modal deploy agent/serve_vllm.py
+GPU_TYPE = os.environ.get("KWTC_VLLM_GPU", "H200")
 MINUTES = 60
 VLLM_PORT = 8000
 
 
 @app.server(
     image=vllm_image,
-    gpu=f"H200:{N_GPU}",
+    gpu=f"{GPU_TYPE}:{N_GPU}",
     scaledown_window=15 * MINUTES,
     startup_timeout=10 * MINUTES,
     volumes={"/root/.cache/huggingface": hf_cache_vol, "/root/.cache/vllm": vllm_cache_vol},
