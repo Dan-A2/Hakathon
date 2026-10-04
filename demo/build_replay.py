@@ -2,8 +2,10 @@
 
     python -m demo.build_replay            # needs art/ (caches, models) and data/cases/
 
-Every number comes from the cached LLM calls and the shipped credence-based epistemic agent
-(art/models/<model>/epistemic_eu.npz); the demo page only replays them, so it works offline.
+Every number comes from the cached LLM calls and the two shipped epistemic agents: the credence-based one
+(art/models/<model>/epistemic_eu.npz, logistic credences + expected reward) and the two-stage REINFORCE one
+(epistemic_rl.npz).  Story cases are limited to claims where both agents deliver the same verdict; the
+results tab reports the true agreement rate over all cases.  The page only replays, so it works offline.
 Gold labels are included for the "reveal" step only.
 """
 from __future__ import annotations
@@ -15,7 +17,8 @@ from pathlib import Path
 from common import config as C
 from common import models as M
 from common.io import read_jsonl
-from controller.epistemic import EUController
+from controller.epistemic import EUController, TwoStageController
+from data.library import SEARCH, library_stats
 from data.records import StoreRegistry
 from scorer.score import load_scored, outcome
 
@@ -36,6 +39,13 @@ def _sentence(store, exclude, doc_id, sent):
         return {"doc_id": doc_id, "sentence": sent, "title": None, "text": None}
     text = rec["sentences"][int(sent)] if sent is not None and 0 <= int(sent) < len(rec["sentences"]) else None
     return {"doc_id": doc_id, "sentence": sent, "title": rec["title"], "text": _short(text, 360) if text else None}
+
+
+def rl_payload(sc, dec, info) -> dict:
+    o = outcome(sc, dec)
+    return {"decision": C.DECISIONS[dec], "verdict": o["verdict"], "correct": o["correct"],
+            "stage1": {k: round(v, 4) for k, v in info["stage1"].items()},
+            "stage2": {k: round(v, 4) for k, v in info["stage2"].items()} if "stage2" in info else None}
 
 
 def case_payload(sc, case, dec, cred, info, judge, store, exclude, model_key, split) -> dict:
@@ -85,12 +95,24 @@ def case_payload(sc, case, dec, cred, info, judge, store, exclude, model_key, sp
     return p
 
 
+def _claim(v: str) -> str:
+    """What the agent asserts: declining and "not enough evidence" both assert nothing about the claim."""
+    return v if v in C.COMMIT_LABELS else "no_claim"
+
+
+def same_verdict(r: dict) -> bool:
+    return _claim(r["rl"]["verdict"]) == _claim(r["agent"]["verdict"])
+
+
 def stories(rows: list[dict]) -> dict[str, list[dict]]:
     """Pick the cases that tell the project's story, most striking first."""
     by_id = {r["case_id"]: r for r in rows}
     commit = lambda v: v in C.COMMIT_LABELS  # noqa: E731
     out: dict[str, list] = {k: [] for k in ("caught", "fixed", "kept", "twin", "confident", "miss")}
+    agree = same_verdict
     for r in rows:
+        if not agree(r):
+            continue
         a, raw, nc = r["agent"], r["raw"], r["naive_check"]
         if commit(raw["verdict"]) and not raw["correct"] and raw["confidence"] >= 0.8 and a["verdict"] == "abstain":
             out["caught"].append((-raw["confidence"], r))
@@ -103,12 +125,13 @@ def stories(rows: list[dict]) -> dict[str, list[dict]]:
         if commit(a["verdict"]) and not a["correct"] and (a["credence"] or 0) >= 0.6:
             out["miss"].append((-(a["credence"] or 0), r))
         twin = by_id.get(r["case_id"] + "-abl")
-        if twin and r["agent"]["correct"] and commit(r["agent"]["verdict"]) and twin["raw"]["verdict"] == r["raw"]["verdict"] \
+        if twin and agree(twin) and r["agent"]["correct"] and commit(r["agent"]["verdict"]) and twin["raw"]["verdict"] == r["raw"]["verdict"] \
                 and commit(twin["raw"]["verdict"]) and twin["agent"]["verdict"] in ("abstain", "insufficient_evidence"):
             out["twin"].append((-twin["raw"]["confidence"], r))
     picked = {}
     for k, lst in out.items():
-        lst.sort(key=lambda t: (t[0], len(t[1]["claim"])))
+        # same route (decision) first, then most striking, then shortest claim
+        lst.sort(key=lambda t: (t[1]["rl"]["decision"] != t[1]["agent"]["decision"], t[0], len(t[1]["claim"])))
         chosen, seen = [], set()
         for _, r in lst:                                  # one per domain first, then the next most striking
             if r["split"] not in seen and len(chosen) < PER_STORY:
@@ -123,7 +146,7 @@ def stories(rows: list[dict]) -> dict[str, list[dict]]:
     return picked
 
 
-def summary(model_key: str) -> dict:
+def summary(model_key: str, rows: list[dict]) -> dict:
     out = {}
     for split, fn in (("test_id", "comparison.json"), ("test_ood", "comparison_ood.json"),
                       ("test_climate", "comparison_climate.json"), ("test_vitc", "comparison_vitc.json")):
@@ -133,13 +156,20 @@ def summary(model_key: str) -> dict:
         row = next((r for r in json.loads(path.read_text()) if r["key"] == model_key), None)
         if not row or not row.get("epistemic", {}).get("epistemic_eu"):
             continue
-        e, b = row["epistemic"]["epistemic_eu"], row["baseline"]
+        e, b, rl = row["epistemic"]["epistemic_eu"], row["baseline"], row["epistemic"].get("epistemic_rl") or {}
+        mine = [r for r in rows if r["split"] == split]
         out[split] = {"n": row["n_cases"], "wrong_raw": b["harmful"]["mean"], "wrong_agent": e["harmful"]["mean"],
                       "ece_raw": row["calibration"]["ece_raw_answer"], "ece_agent": e["credence_ece"],
                       "coverage": e["coverage"]["mean"], "sel_acc_raw": b["selective_accuracy"]["mean"],
                       "sel_acc_agent": e["selective_accuracy"]["mean"], "fab_raw": b.get("fabrication_raw_checker"),
                       "fab_agent": e["fabrication"], "check_rate": e["check_rate"],
-                      "verify_fixed": row["verify_wrong_to_right"]["mean"], "verify_broke": row["verify_right_to_wrong"]["mean"]}
+                      "verify_fixed": row["verify_wrong_to_right"]["mean"], "verify_broke": row["verify_right_to_wrong"]["mean"],
+                      "util_raw": b["utility"]["mean"], "util_agent": e["utility"]["mean"],
+                      "util_rl": rl.get("utility", {}).get("mean"), "wrong_rl": rl.get("harmful", {}).get("mean"),
+                      "coverage_rl": rl.get("coverage", {}).get("mean"), "sel_acc_rl": rl.get("selective_accuracy", {}).get("mean"),
+                      "check_rate_rl": rl.get("check_rate"),
+                      "agree_verdict": sum(same_verdict(r) for r in mine) / max(1, len(mine)),
+                      "agree_decision": sum(r["rl"]["decision"] == r["agent"]["decision"] for r in mine) / max(1, len(mine))}
     return out
 
 
@@ -150,11 +180,12 @@ def main(argv=None):
     args = ap.parse_args(argv)
     cases_dir = Path(args.cases_dir)
     reg = StoreRegistry(cases_dir)
-    payload = {"models": [], "cases": {}, "stories": {}, "w": None}
+    payload = {"models": [], "cases": {}, "stories": {}, "w": None, "library": library_stats(cases_dir), "search": SEARCH}
     for key in M.ORDER[::-1]:
         m = M.get(key)
         cache_dir = C.ART_DIR / m["cache"]
         eu = EUController.load(C.ART_DIR / "models" / key / "epistemic_eu.npz")
+        rl = TwoStageController.load(C.ART_DIR / "models" / key / "epistemic_rl.npz")
         payload["w"], payload["c"] = eu.w, eu.c
         rows = []
         for split in DOMAINS:
@@ -163,11 +194,16 @@ def main(argv=None):
             cases = {r["case_id"]: r for r in read_jsonl(cases_dir / f"{split}.jsonl")}
             judges = {r["case_id"]: r for r in read_jsonl(cache_dir / f"judge_{split}.jsonl")} if (cache_dir / f"judge_{split}.jsonl").exists() else {}
             log = {r["case_id"]: r for r in read_jsonl(C.ART_DIR / "models" / key / "logs" / f"{split}_epistemic_eu.jsonl")}
+            log_rl = {r["case_id"]: r for r in read_jsonl(C.ART_DIR / "models" / key / "logs" / f"{split}_epistemic_rl.jsonl")}
             for sc in load_scored(split, cases_dir, cache_dir):
                 dec, cred, info = eu.decide(sc.x, sc.z)
                 assert C.DECISIONS[dec] == log[sc.case_id]["action"], (key, sc.case_id)   # same agent as the report
+                dec_rl, info_rl = rl.decide(sc.x, sc.z)
+                assert C.DECISIONS[dec_rl] == log_rl[sc.case_id]["action"], (key, sc.case_id, "rl")
                 store, exclude = reg.for_case(cases[sc.case_id])
-                rows.append(case_payload(sc, cases[sc.case_id], dec, cred, info, judges.get(sc.case_id), store, exclude, key, split))
+                row = case_payload(sc, cases[sc.case_id], dec, cred, info, judges.get(sc.case_id), store, exclude, key, split)
+                row["rl"] = rl_payload(sc, dec_rl, info_rl)
+                rows.append(row)
         picked = stories(rows)
         by_id = {r["case_id"]: r for r in rows}
         keep = {cid for ids in picked.values() for cid in ids}
@@ -177,7 +213,7 @@ def main(argv=None):
             payload["cases"][f"{key}:{cid}"] = by_id[cid]
         payload["stories"][key] = {k: [f"{key}:{c}" for c in v] for k, v in picked.items()}
         payload["models"].append({"key": key, "label": m["label"], "params_total": m["params_total"],
-                                  "params_active": m["params_active"], "summary": summary(key), "n_cases": len(rows)})
+                                  "params_active": m["params_active"], "summary": summary(key, rows), "n_cases": len(rows)})
         print(f"{key}: {len(rows)} cases scored, {len(keep)} shipped; " + ", ".join(f"{k}={len(v)}" for k, v in picked.items()))
     # a script, not JSON, so demo/index.html also works when opened straight from disk (file://)
     Path(args.out).write_text("window.REPLAY = " + json.dumps(payload, separators=(",", ":"), default=float) + ";\n", encoding="utf-8")

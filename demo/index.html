@@ -153,7 +153,7 @@
   .banner { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; background: var(--bad-bg); color: var(--bad-ink); font-weight: 600; font-size: 14px; margin-bottom: 8px; }
 
   .sample .top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
-  .meter-row { display: grid; grid-template-columns: 120px 1fr 44px; align-items: center; gap: 10px; font-size: 13px; color: var(--ink2); margin: 5px 0; }
+  .meter-row { display: grid; grid-template-columns: 150px 1fr 44px; align-items: center; gap: 10px; font-size: 13px; color: var(--ink2); margin: 5px 0; }
   .meter { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; position: relative; }
   .meter .f { height: 100%; border-radius: 4px; background: var(--answer); transition: width .6s ease; }
   .meter .tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); border-radius: 1px; }
@@ -240,9 +240,21 @@
   table.data th { color: var(--muted); font-weight: 600; font-size: 12px; }
   details.tbl summary { cursor: pointer; color: var(--ink2); font-size: 14px; margin-top: 18px; }
 
+  .libs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 18px; }
+  .lib { padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; }
+  .lib h3 { margin: 0; font-size: 19px; }
+  .lib .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .lib .stat { background: var(--surface2); border-radius: 10px; padding: 9px 12px; }
+  .lib .stat .v { font-size: 20px; font-weight: 650; }
+  .lib .stat .l { font-size: 12px; color: var(--muted); }
+  .lib .ex { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 13.5px; }
+  .lib .ex .sent { color: var(--ink2); margin: 3px 0; } .lib .ex .sent b { color: var(--muted); font-weight: 600; margin-right: 6px; font-variant-numeric: tabular-nums; }
+  .tool { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .tool code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
+  .tool p { margin: 6px 0 0; font-size: 13.5px; color: var(--ink2); }
   @media (max-width: 1000px) {
     .walk { grid-template-columns: 1fr; } .side { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--border); }
-    .flow, .rules, .tiles, .models, .findings, .grid3 { grid-template-columns: 1fr; } .grid2, .verdict-main { grid-template-columns: 1fr; }
+    .flow, .rules, .tiles, .models, .findings, .grid3, .libs { grid-template-columns: 1fr; } .grid2, .verdict-main { grid-template-columns: 1fr; }
     .flow .step::after { display: none; } .hero h1 { font-size: 34px; } .tabs { display: none; }
   }
 </style>
@@ -254,6 +266,7 @@
     <button class="tab on" data-view="overview">Overview</button>
     <button class="tab" data-view="walk">Live walkthrough</button>
     <button class="tab" data-view="results">Results</button>
+    <button class="tab" data-view="library">Library</button>
   </nav>
   <div class="spacer"></div>
   <a class="linkbtn" id="reportLink" href="/report" target="_blank" hidden>Full report ↗</a>
@@ -324,8 +337,27 @@
     <div class="models" id="modelCards"></div>
     <details class="tbl"><summary>Show as table</summary><div id="resTable"></div></details>
 
+    <h2 class="section">Two ways to learn the decision: credence-based vs. reinforcement learning</h2>
+    <p class="section-sub">Same frozen model, same signals, same rules and reward. The credence-based agent fits logistic regressions for P(correct) and takes the highest expected reward. The RL agent learns a two-stage softmax policy with REINFORCE on the saved runs.</p>
+    <div class="models" id="rlCards"></div>
+
     <h2 class="section">What we found</h2>
     <div class="findings" id="findings"></div>
+  </div>
+</section>
+
+<!-- ============================== LIBRARY ============================== -->
+<section class="view" id="view-library">
+  <div class="wrap">
+    <div class="eyebrow">The data</div>
+    <h2 class="section" style="margin-top:6px">The library: what the model is allowed to read</h2>
+    <p class="section-sub" style="max-width:860px">Each domain comes with its own fixed collection of documents, stored as files: no internet and no memory. Each record is a title plus numbered sentences, so a verdict can point at the exact sentence it rests on.</p>
+    <div class="libs" id="libCards"></div>
+    <h2 class="section">How the agent searches it</h2>
+    <div class="card" style="padding:20px 24px;margin-top:12px">
+      <div class="grid3" id="toolCards"></div>
+      <p class="ink2" style="margin:16px 0 0" id="searchText"></p>
+    </div>
   </div>
 </section>
 
@@ -408,13 +440,19 @@ function storyList() {
   const S = D.stories[st.model] || {};
   $("#storyList").innerHTML = STORIES.map(s => {
     const ids = S[s.key] || [];
+    if (!ids.length) return "";
     const items = ids.length ? ids.map(id => { const c = D.cases[id];
       const active = st.caseId === id || (cur() && cur().parent_id && `${c.model}:${c.case_id}` === `${cur().model}:${cur().parent_id}`);
       return `<button class="case-btn ${active ? "on" : ""}" data-id="${esc(id)}"><span class="clamp">${esc(c.claim)}</span><span class="dom">${esc(DOMAIN_SHORT[c.split])}</span></button>`; }).join("")
       : `<div class="empty-story">No such case for this model</div>`;
     return `<div class="story"><div class="story-h"><span class="ic">${s.ic}</span>${esc(s.title)}</div><div class="story-sub">${esc(s.sub)}</div>${items}</div>`;
-  }).join("");
+  }).join("") + `<p class="small muted" style="margin:22px 4px 0">Shown: real cases where both of our agents, credence-based and RL, reach the same verdict. Overall they agree on ${pct(agreeAll(st.model))} of claims (see Results).</p>`;
   $("#storyList").querySelectorAll(".case-btn").forEach(b => b.onclick = () => openCase(b.dataset.id));
+}
+function agreeAll(key) {
+  const S = D.models.find(m => m.key === key)?.summary || {}; let n = 0, a = 0;
+  for (const v of Object.values(S)) { n += v.n; a += v.agree_verdict * v.n; }
+  return n ? a / n : null;
 }
 function setModel(m) {
   st.model = m; modelSeg();
@@ -439,21 +477,27 @@ function meterRow(label, v, color = "var(--answer)", tick = null) {
   return `<div class="meter-row"><span>${esc(label)}</span><div class="meter"><div class="f" style="width:${clamp01(v) * 100}%;background:${color}"></div>${tick !== null ? `<div class="tick" style="left:calc(${tick * 100}% - 1px)"></div>` : ""}</div><span class="num">${pct(v)}</span></div>`;
 }
 
+function libLabel(split) {
+  const l = (D.library || {})[split]; if (!l) return "library";
+  return l.n_files > 1 ? `${l.name} library (this claim's own record set)` : `${l.name} library (${Number(l.n_records).toLocaleString()} records)`;
+}
 function panelEvidence(c) {
   const removed = c.excluded && c.excluded.length;
-  return `<div class="card panel"><div class="panel-h"><span class="k">1</span><h3>What the model is shown</h3><span class="why">top-${c.evidence.length} retrieved ${c.split === "test_id" ? "abstracts" : "records"} · click to expand</span></div>
+  return `<div class="card panel"><div class="panel-h"><span class="k">1</span><h3>What the model is shown</h3><span class="why">top-${c.evidence.length} BM25 match${c.evidence.length === 1 ? "" : "es"} from the ${libLabel(c.split)} · click to expand</span></div>
     ${removed ? `<div class="banner">✂️ Evidence deleted: the decisive ${c.split === "test_id" ? "abstract was" : "records were"} removed from the library (${c.excluded.length}). Retrieval now returns the next-best matches.</div>` : ""}
     ${c.evidence.map(e => `<div class="ev"><div class="t">${esc(e.title || "Record " + e.doc_id)}</div><div class="x">${esc(e.text)}</div></div>`).join("")}</div>`;
 }
 function panelSamples(c) {
   const s = c.samples, x = c.signals;
   const sample = (smp, i) => `<div class="sub sample"><div class="top-row"><span class="eyebrow">Answer ${"AB"[i]}</span>${verdictPill(smp.verdict)}</div>
-    ${meterRow("Says it’s sure", smp.confidence)}${meterRow("Evidence enough", smp.sufficiency)}
+    <div class="small muted" style="margin-bottom:2px">Self-reported by the model:</div>
+    ${meterRow("Confidence", smp.confidence)}${meterRow("Evidence sufficiency", smp.sufficiency)}
     <p class="rationale">${esc(smp.rationale)}</p></div>`;
   const chip = (k, v) => `<span class="chip">${esc(k)} <b>${v}</b></span>`;
   return `<div class="card panel"><div class="panel-h"><span class="k">2</span><h3>Ask the frozen model twice</h3><span class="why">two independent samples → six doubt signals</span></div>
     <div class="grid2">${sample(s[0], 0)}${sample(s[1], 1)}</div>
-    <div class="chips">${chip("Answers agree", x.agree >= 1 ? "yes" : "no")}${chip("Mean confidence", pct(x.conf_mean))}${chip("Evidence sufficiency", pct(x.suff_mean))}${chip("Confidence gap", pct(x.conf_gap))}${chip("Says “not enough evidence”", pct(x.says_insuff))}${x.tok_prob !== undefined ? chip("Token probability", pct(x.tok_prob)) : ""}</div></div>`;
+    <div class="small muted" style="margin-top:14px">Signals we compute from the two answers:</div>
+    <div class="chips" style="margin-top:6px">${chip("Answers agree", x.agree >= 1 ? "yes" : "no")}${chip("Mean confidence", pct(x.conf_mean))}${chip("Mean evidence sufficiency", pct(x.suff_mean))}${chip("Confidence gap", pct(x.conf_gap))}${chip("One answer says “not enough evidence”", x.says_insuff >= 1 ? "yes" : "no")}${x.tok_prob !== undefined ? chip("Token probability (from the model’s output probabilities)", pct(x.tok_prob)) : ""}</div></div>`;
 }
 function panelDecide(c) {
   const ev = c.agent.ev, w = D.w ?? 1, dec = c.agent.decision;
@@ -474,7 +518,20 @@ function panelDecide(c) {
       <span class="name"><span class="sw" style="background:${o.color}"></span>${o.name}</span>${bar(o.v, o.color)}<span class="val num">${o.v >= 0 ? "+" : "−"}${Math.abs(o.v).toFixed(2)}</span></div>`).join("")}</div>
     <div class="axis-labels"><span></span><span class="scale"><span>−1 (sure to be wrong)</span><span>0</span><span>+1 (sure to be right)</span></span><span></span></div>
     <div style="margin-top:14px">${meterRow("P(answer right)", ev.p_answer, "var(--answer)", thr)}</div>
-    <div class="callout">${why}</div></div>`;
+    <div class="callout">${why}</div>${rlBox(c)}</div>`;
+}
+const RL_NAME = { answer_grounded: "Answer now", check_commit: "Check → use the new verdict", check_keep_prior: "Check → keep the first answer",
+  check_abstain: "Check → decline", abstain: "Decline" };
+function rlBox(c) {
+  const r = c.rl; if (!r) return "";
+  const p = r.stage1, chosen = r.decision === "answer_grounded" ? "answer_grounded" : r.decision === "abstain" ? "abstain" : "check";
+  const same = r.decision === c.agent.decision;
+  const rows = [["answer_grounded", "Answer now", "var(--answer)"], ["check", "Check first", "var(--check)"], ["abstain", "Say “I don’t know”", "var(--abstain)"]]
+    .map(([k, n, col]) => `<div class="meter-row" style="${k === chosen ? "font-weight:650;color:var(--ink)" : ""}"><span>${n}${k === chosen ? " ◀" : ""}</span><div class="meter"><div class="f" style="width:${clamp01(p[k]) * 100}%;background:${col}"></div></div><span class="num">${pct(p[k])}</span></div>`).join("");
+  return `<div class="sub" style="margin-top:14px"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px">
+      <span class="eyebrow">Second opinion · RL agent (REINFORCE policy)</span>
+      <span class="status ${same ? "good" : "neutral"}">${same ? "✓ Same decision" : "Same conclusion, different route"}</span></div>
+    <div class="small ink2" style="margin-bottom:8px">Trained by trial and error on the saved runs. Its policy gives these action probabilities and it takes the most likely: <b>${esc(RL_NAME[r.decision] || r.decision)}</b>.</div>${rows}</div>`;
 }
 function panelCheck(c) {
   if (!hasCheck(c)) {
@@ -534,11 +591,12 @@ function panelVerdict(c) {
     : parent ? `<div class="takeaway neutral">The evidence is gone. The raw model still says <b>${esc(VERDICT[c.raw.verdict])}</b> (${pct(c.raw.confidence)} sure), as it did with the evidence. Press <kbd>E</kbd> to compare.</div>` : "";
   return `<div class="card panel"><div class="panel-h"><span class="k">5</span><h3>Verdict</h3><span class="why">${a.llm_calls} LLM calls · ${a.tool_calls} tool calls · ${a.tokens.toLocaleString()} tokens</span></div>
     <div class="verdict-main">
-      <div class="final"><div class="eyebrow">Our agent · ${esc(d.label)}</div>
+      <div class="final"><div class="eyebrow">Our agent (credence-based) · ${esc(d.label)}</div>
         <div class="big">${esc(VERDICT[a.verdict] || a.verdict)} ${R ? correctness(a.verdict, a.correct) : ""}</div>
         <div class="cred">${a.credence !== null && a.credence !== undefined ? `Calibrated credence <b>${pct(a.credence)}</b> that this verdict is right` : `No verdict delivered, so there is nothing to be confident about`}</div>
         ${cites}</div>
       <div class="vs">
+        ${c.rl ? `<div class="sub"><div class="eyebrow">RL agent (REINFORCE) · ${esc(RL_NAME[c.rl.decision] || c.rl.decision)}</div><div class="row">${verdictPill(c.rl.verdict)}${R ? correctness(c.rl.verdict, c.rl.correct) : ""}</div><div class="small muted">${c.rl.verdict === c.agent.verdict ? "same verdict as our agent" : "also makes no claim, like our agent"}</div></div>` : ""}
         <div class="sub"><div class="eyebrow">Raw model alone · always answers</div><div class="row">${verdictPill(raw.verdict)}${R ? correctness(raw.verdict, raw.correct) : ""}</div><div class="small muted">states ${pct(raw.confidence)} confidence</div></div>
         <div class="sub"><div class="eyebrow">Naive checker · always looks it up, no rules</div><div class="row">${verdictPill(nc.verdict)}${R ? correctness(nc.verdict, nc.correct) : ""}</div><div class="small muted">states ${pct(nc.confidence)} confidence</div></div>
       </div>
@@ -619,12 +677,47 @@ function results() {
     <div class="metric"><div class="mh"><span>Made-up sources</span><span class="better">${pct(s.fab_raw, 1)} → <b style="color:var(--ink)">${pct(s.fab_agent, 1)}</b></span></div></div></div>`).join("");
   $("#resTable").innerHTML = `<table class="data"><tr><th>Model</th><th>Wrong (raw)</th><th>Wrong (agent)</th><th>ECE (raw)</th><th>ECE (agent)</th><th>Acc. when answering (raw)</th><th>(agent)</th><th>Answered</th><th>Checked</th></tr>
     ${rows.map(({ m, s }) => `<tr><td>${esc(m.label)}</td><td>${pct(s.wrong_raw, 1)}</td><td>${pct(s.wrong_agent, 1)}</td><td>${pct(s.ece_raw, 1)}</td><td>${pct(s.ece_agent, 1)}</td><td>${pct(s.sel_acc_raw, 1)}</td><td>${pct(s.sel_acc_agent, 1)}</td><td>${pct(s.coverage, 1)}</td><td>${pct(s.check_rate, 1)}</td></tr>`).join("")}</table>`;
+  const u = (x) => x === null || x === undefined ? "—" : (x >= 0 ? "+" : "−") + Math.abs(x).toFixed(3);
+  $("#rlCards").innerHTML = rows.map(({ m, s }) => `<div class="card mcard"><h3>${esc(m.label)}</h3><div class="sz">${s.n} cases · reward per claim (+1 right, −1 wrong, 0 decline)</div>
+    <table class="data"><tr><th></th><th>Raw</th><th>Credence</th><th>RL</th></tr>
+      <tr><td>Reward per claim</td><td>${u(s.util_raw)}</td><td>${u(s.util_agent)}</td><td>${u(s.util_rl)}</td></tr>
+      <tr><td>Wrong answers</td><td>${pct(s.wrong_raw)}</td><td>${pct(s.wrong_agent)}</td><td>${pct(s.wrong_rl)}</td></tr>
+      <tr><td>Claims answered</td><td>100%</td><td>${pct(s.coverage)}</td><td>${pct(s.coverage_rl)}</td></tr>
+      <tr><td>Accuracy when answering</td><td>${pct(s.sel_acc_raw)}</td><td>${pct(s.sel_acc_agent)}</td><td>${pct(s.sel_acc_rl)}</td></tr>
+      <tr><td>Claims checked</td><td>0%</td><td>${pct(s.check_rate)}</td><td>${pct(s.check_rate_rl)}</td></tr></table>
+    <div class="metric"><div class="mh"><span>The two agents agree</span><span>${pct(s.agree_verdict)} <span class="better">same verdict</span></span></div>
+      <div class="pair"><div class="pbar agent"><div class="tr"><div class="f" style="width:${s.agree_verdict * 100}%;background:var(--answer)"></div></div><span class="v">${pct(s.agree_verdict)}</span><span class="tip">same verdict on ${pct(s.agree_verdict, 1)} of claims · same decision on ${pct(s.agree_decision, 1)}</span></div></div>
+      <div class="small muted" style="margin-top:4px">same decision (same route) on ${pct(s.agree_decision)}</div></div></div>`).join("");
   const vb = rows.map(r => `${MODEL_SHORT[r.m.key]}: fixed ${pct(r.s.verify_fixed)}, broke ${pct(r.s.verify_broke)}`).join(" · ");
   $("#findings").innerHTML = [
     { h: "Unchecked checking makes models worse", p: `Letting the model look things up with no rules broke more right answers than it fixed (${vb}). The three rules turn checking into evidence the agent can weigh.` },
     { h: "Models judge by topic, not evidence", p: "Delete only the decisive sentence and all three models keep answering, at the same confidence. The blind judge catches most of these." },
     { h: "Confidence doesn’t travel; a little data fixes it", p: "In a new domain the model’s self-confidence carries no signal, but evidence-based signals transfer. About 100 labelled examples bring calibration back, and the agent can refuse domains it can’t serve safely." },
   ].map((f, i) => `<div class="card finding"><div class="n">0${i + 1}</div><h4>${esc(f.h)}</h4><p>${esc(f.p)}</p></div>`).join("");
+}
+
+/* ---------------- library ---------------- */
+function library() {
+  const L = D.library || {};
+  const n = (x) => Number(x).toLocaleString();
+  $("#libCards").innerHTML = Object.values(L).map(l => `<div class="card lib">
+    <div><div class="eyebrow">${esc(l.domain)}</div><h3>${esc(l.name)}</h3>
+      <div class="small muted">${esc(l.paper)} · <a href="${esc(l.url)}" target="_blank" rel="noopener">source ↗</a></div></div>
+    <div class="small ink2">${esc(l.claims)} ${esc(l.library)}</div>
+    <div class="stats"><div class="stat"><div class="v">${n(l.n_records)}</div><div class="l">records in the library</div></div>
+      <div class="stat"><div class="v">${l.sent_per_record.toFixed(1)}</div><div class="l">sentences per record</div></div>
+      <div class="stat"><div class="v">${n(l.n_claims)}</div><div class="l">test claims${l.n_files > 1 ? ` · ${n(l.n_files)} libraries` : ""}</div></div></div>
+    ${l.example ? `<div class="ex"><div class="eyebrow" style="margin-bottom:4px">Example: claim → top retrieved record</div>
+      <div style="margin-bottom:8px">“${esc(l.example_claim)}”</div>
+      <div style="font-weight:600">${esc(l.example.title)} <span class="muted small">· doc ${esc(l.example.doc_id)} · ${l.example.n_sentences} sentence${l.example.n_sentences === 1 ? "" : "s"}</span></div>
+      ${l.example.sentences.map((x, i) => `<div class="sent"><b>${i}</b>${esc(x)}</div>`).join("")}</div>` : ""}
+  </div>`).join("");
+  $("#toolCards").innerHTML = [
+    ["search_records", "🔍", "Give a query, get the top 5 records by BM25 keyword ranking: id, title, first sentence."],
+    ["read_record", "📖", "Open one record and get its sentences, numbered (at most 25). Only opened or shown records may be quoted."],
+    ["calculate", "🧮", "Arithmetic for comparing reported numbers, e.g. 493 per million vs 1/2000. Runs in a locked-down sandbox."],
+  ].map(([t, ic, d]) => `<div class="tool">${ic} <code>${t}</code><p>${esc(d)}</p></div>`).join("");
+  $("#searchText").textContent = D.search || "";
 }
 
 /* ---------------- keyboard ---------------- */
@@ -645,7 +738,7 @@ document.addEventListener("keydown", (e) => {
 /* ---------------- boot ---------------- */
 if (!D) { document.body.innerHTML = "<p style='padding:40px'>replay.js not found. Run <code>python -m demo.build_replay</code>.</p>"; }
 else {
-  st.view = "overview"; overview(); modelSeg(); setModel(st.model); results();
+  st.view = "overview"; overview(); modelSeg(); setModel(st.model); results(); library();
   // deep links for rehearsed demos: #results&domain=test_ood  or  #walk&case=llama8b:sf-dev-0013&step=4&reveal
   const h = new URLSearchParams(location.hash.slice(1));
   if (h.has("domain")) { st.domain = h.get("domain"); results(); }
@@ -655,7 +748,7 @@ else {
   if (h.has("step")) goStep(+h.get("step"), false);
   if (h.has("reveal")) { st.revealed = true; renderStage(); }
   if (h.has("dark")) document.documentElement.dataset.theme = "dark";
-  for (const v of ["overview", "walk", "results"]) if (h.has(v)) show(v);
+  for (const v of ["overview", "walk", "results", "library"]) if (h.has(v)) show(v);
 }
 </script>
 </body>

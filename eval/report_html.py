@@ -196,6 +196,33 @@ def sec_data(d: dict) -> str:
         ["Split", "Source", "Cases", "Claim groups", "Variants", "Labels", "Purpose"], rows, "Every split used in this report") + design)
 
 
+def _library_rows(lib: dict) -> list[list[str]]:
+    return [[f'<b>{E(l["name"])}</b><br><span class="note">{E(l["domain"])}</span>',
+             f'<a href="{E(l["url"])}">{E(l["paper"])}</a>', f'{l["n_records"]:,}',
+             f'{l["n_files"]:,}' if l["n_files"] > 1 else "1 (shared)", f'{l["sent_per_record"]:.1f}', f'{l["n_claims"]:,}', E(l["library"])]
+            for l in lib.values()]
+
+
+def sec_library(d: dict) -> str:
+    from data.library import SEARCH, library_stats
+
+    lib = library_stats()
+    t = table(["Domain", "Source", "Records", "Libraries", "Sentences / record", "Test claims", "What the library is"], _library_rows(lib),
+              "The document libraries the agent reads and searches (computed from data/cases/)")
+    ex = "".join(f'''<div class="card" style="margin:10px 0;padding:12px 16px"><div class="note">{E(l["name"])} · claim &rarr; top retrieved record</div>
+        <p style="margin:4px 0"><i>&ldquo;{E(l["example_claim"])}&rdquo;</i></p><p style="margin:4px 0"><b>{E(l["example"]["title"])}</b>
+        <span class="note">doc {E(str(l["example"]["doc_id"]))} · {l["example"]["n_sentences"]} sentence(s)</span></p>
+        {"".join(f'<p class="note" style="margin:2px 0">[{i}] {E(x)}</p>' for i, x in enumerate(l["example"]["sentences"]))}</div>'''
+                 for l in lib.values() if l.get("example"))
+    tools = table(["Tool", "What it returns", "Limit"], [
+        ["<code>search_records</code>", "top 5 records by BM25 for the agent's query: id, title, first sentence", "&le; 4 tool calls in total"],
+        ["<code>read_record</code>", "one record as numbered sentences (the only thing a checked verdict may quote)", "25 sentences, 400 characters each"],
+        ["<code>calculate</code>", "arithmetic for comparing reported numbers", "Modal Sandbox, no network, 10 s"]], "The three tools of the check")
+    return section("library", "3b. The library: what the agent reads and searches",
+                   t + f"<p>{E(SEARCH)}</p>" + tools + "<h3>One example per library</h3>" + ex,
+                   "Every domain ships a fixed document collection; nothing comes from the web or from the model's memory.")
+
+
 def sec_models(d: dict) -> str:
     rows = []
     for k in M.ORDER:
@@ -533,14 +560,14 @@ code {{ font-size:12px; background:#f3f3f0; padding:1px 4px; border-radius:4px; 
 @media print {{ nav {{ display:none; }} .wrap {{ display:block; }} section {{ break-inside:avoid; border:none; padding:0; }} .two-col {{ grid-template-columns:1fr 1fr; }} }}
 '''
 
-NAV = [("top", "Overview"), ("problem", "1. Problem"), ("pipeline", "2. Pipeline"), ("data", "3. Data"), ("models", "4. Models"), ("method", "5. Method"),
+NAV = [("top", "Overview"), ("problem", "1. Problem"), ("pipeline", "2. Pipeline"), ("data", "3. Data"), ("library", "3b. Library"), ("models", "4. Models"), ("method", "5. Method"),
        ("hyper", "6. Hyper-parameters"), ("results", "7. Results in-domain"), ("behaviour", "8. Agent behaviour"), ("integrity", "9. Integrity"),
        ("transfer", "10. Cross-domain"), ("ladder", "11. Evidence ladder"), ("ablation", "12. Ablation"), ("infer", "13. What to infer"), ("repro", "14. Reproducibility")]
 
 
 def build(out: Path) -> Path:
     d = load_all()
-    parts = [sec_hero(d), sec_problem(), sec_pipeline(), sec_data(d), sec_models(d), sec_method(), sec_hyper(d), sec_results_in_domain(d),
+    parts = [sec_hero(d), sec_problem(), sec_pipeline(), sec_data(d), sec_library(d), sec_models(d), sec_method(), sec_hyper(d), sec_results_in_domain(d),
              sec_behaviour(d), sec_integrity(d), sec_transfer(d), sec_ladder(d), sec_ablation(d), sec_inference(), sec_repro(d)]
     nav = "".join(f'<a href="#{i}">{t}</a>' for i, t in NAV)
     page = f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -621,6 +648,9 @@ def build_brief(out: Path, full_name: str = "full.html") -> Path:
                 eces0.append(r["zero_shot"]["ece"]); eces1.append(r["few_shot"][ks[-1]]["ece"][0])
     n_cases = sum(v["n"] for v in d["manifest"].get("splits", {}).values()) + sum(v["n"] for v in d["manifest"].get("extra_splits", {}).values())
     b64 = base64.b64encode(diagram.read_bytes()).decode()
+    from data.library import library_stats
+    library_table = table(["Subject", "Source", "Records", "Libraries", "Sentences / record", "Test claims", "What the library is"],
+                          _library_rows(library_stats()))
 
     html_ = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Know-When-To-Check</title><style>{BRIEF_CSS}
@@ -638,6 +668,12 @@ def build_brief(out: Path, full_name: str = "full.html") -> Path:
   <h2>How it works</h2>
   <figure><img src="data:image/png;base64,{b64}" alt="Pipeline diagram" style="width:100%"></figure>
   <p>The model is consulted at most a handful of times per claim. Steps 3, 4, 6 and 8 are cheap calculations; only steps 2, 5 and 7 call the model.</p>
+</section>
+
+<section>
+  <h2>The library the model reads</h2>
+  <p>Each subject has its own fixed collection of documents, split into numbered sentences. The model reads only these: no internet, no memory. Search is classic keyword ranking (BM25); when the agent checks, it searches, opens records and must quote a sentence it opened.</p>
+  {library_table}
 </section>
 
 <section>

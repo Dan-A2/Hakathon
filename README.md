@@ -274,6 +274,7 @@ functions, nothing else.
 ```
 data/prepare.py        download SciFact + HealthVer, BM25 record files, twins, group split  (writes data/cases/)
 data/records.py        RecordStore: BM25 with per-case exclusions (ablated twins), StoreRegistry
+data/library.py        facts about each domain's document library (sizes, sources, examples) for the demo and report
 agent/llm.py           one chat() interface: vLLM-on-Modal | Claude API | mock
 agent/prompts/         provisional.txt, verify.txt (hashed, frozen after the cache is built)
 agent/provisional.py   two samples -> provisional answer + six signals
