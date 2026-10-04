@@ -16,7 +16,8 @@ import modal
 vllm_image = (
     modal.Image.from_registry("nvidia/cuda:12.9.0-devel-ubuntu22.04", add_python="3.12")
     .entrypoint([])
-    .uv_pip_install("vllm==0.21.0")
+    # Gemma 4 (model type "gemma4") needs Transformers v5; vllm 0.21.0 allows >=5.5.1 but may resolve to v4 otherwise.
+    .uv_pip_install("vllm==0.21.0", "transformers>=5.5.1,<6")
     .env({"HF_XET_HIGH_PERFORMANCE": "1", "VLLM_LOG_STATS_INTERVAL": "1"})
 )
 
@@ -77,9 +78,22 @@ class Server:
         print(*cmd)
         self.process = subprocess.Popen(cmd)
 
+        # Watchdog: if vLLM dies (bad config, OOM, unsupported model), kill the container so Modal reports
+        # the failure and restarts it, instead of the port never opening and every request returning 503.
+        import os
+        import threading
+
+        def _watch(proc=self.process):
+            code = proc.wait()
+            print(f"vllm serve exited with code {code}; stopping the container", flush=True)
+            os._exit(code or 1)
+
+        threading.Thread(target=_watch, daemon=True).start()
+
     @modal.exit()
     def stop(self):
         self.process.terminate()
+        self.process.wait(timeout=30)
 
 
 @app.local_entrypoint()
