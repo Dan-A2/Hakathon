@@ -8,6 +8,14 @@ their evidence.
 Pitch line: *an agent that learns when its own answer is worth checking, and a test bench
 that proves it is not gaming the reward.*
 
+**▶ Video explanation:** https://www.loom.com/share/71e798df14b74ed9a6d4e24f5f4ff662
+
+**Presentation demo:** `python -m demo.serve --port 8000` and open http://127.0.0.1:8000, or simply open
+`demo/index.html` in a browser (works offline). It replays real, cached runs of all three frozen models step by
+step (evidence, two samples, the answer / check / decline decision, the check with the three rules, the verdict, and
+the ground truth), plus a results dashboard. Keys: `→` next step, `R` reveal truth, `E` delete the evidence, `↓` next
+case, `1`-`3` switch model. Rebuild its data with `python -m demo.build_replay`; the live single-claim agent is at `/live`.
+
 Implements `Know-When-To-Check Final Pipeline Spec.pdf` (Oct 3, 2026).
 
 ## What is here
@@ -26,7 +34,8 @@ Implements `Know-When-To-Check Final Pipeline Spec.pdf` (Oct 3, 2026).
 | Seven policies, cluster bootstrap CIs, McNemar, headline tables, per-case logs, case cards, seven figures | `eval/evaluate.py`, `eval/policies.py`, `eval/stats.py`, `eval/figures.py` | done |
 | Reward-design sweep (4 w x 5 c x 5 seeds) -> phase diagram + cost-accuracy frontier | `controller/train.py --sweep`, `modal_app.py::sweep` | done |
 | One-claim inference with the evidence-removal toggle; prompt-hash / model-revision guard | `agent/infer.py` | done |
-| Live demo (FastAPI + one-page UI), locally or on Modal | `demo/serve.py`, `demo/index.html`, `modal_app.py::web` | done |
+| Live demo (FastAPI + one-page UI), locally or on Modal | `demo/serve.py`, `demo/live.html`, `modal_app.py::web` | done |
+| Presentation demo: offline replay of curated real runs + results dashboard | `demo/build_replay.py`, `demo/index.html`, `demo/replay.js` | done |
 | Shortcut-trained controller (stretch, policy 7) | `data/prepare.py --shortcut-variant`, `--shortcut-controller` | done |
 
 Everything above has been run end to end on this machine with the **mock** LLM backend.
@@ -280,7 +289,8 @@ scorer/score.py        gold labels live only here: correctness, rewards, oracle,
 eval/evaluate.py       policies, metrics, bootstrap, McNemar, tables, logs, cards, figures
 eval/figures.py        the seven figures
 modal_app.py           cache map, merge, sandboxed calc, sweep starmap, demo endpoint
-demo/serve.py, demo/index.html   live demo
+demo/serve.py          FastAPI: / presentation demo, /live single-claim agent, /report
+demo/build_replay.py   curated real runs -> demo/replay.js (read by demo/index.html, works from file://)
 tests/                 unit tests + an end-to-end mock run on a synthetic corpus
 art/                   outputs: cache/, controller.npz, calibrator.npz, sweep.jsonl, results_*.md/json, logs/, figs/
 ```

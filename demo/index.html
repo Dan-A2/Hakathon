@@ -1,163 +1,662 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Know-When-To-Check</title>
+<title>Know-When-To-Check · demo</title>
 <style>
   :root {
     color-scheme: light;
-    --surface: #fcfcfb; --plane: #f9f9f7; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
-    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
-    --answer: #2a78d6; --verify: #eb6834; --abstain: #1baf7a; --track: #cde2fb; --meter: #2a78d6;
+    --plane: #f4f3ef; --surface: #fcfcfb; --surface2: #f0efea; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.09); --shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 24px rgba(0,0,0,.05);
+    --answer: #2a78d6; --check: #eb6834; --abstain: #1baf7a; --track: #cde2fb; --neutral: #a5a49c;
+    --good: #0ca30c; --good-ink: #006300; --bad: #d03b3b; --bad-ink: #b02a2a;
+    --good-bg: rgba(12,163,12,.09); --bad-bg: rgba(208,59,59,.08); --accent-bg: rgba(42,120,214,.08);
   }
-  @media (prefers-color-scheme: dark) {
-    :root { color-scheme: dark; --surface: #1a1a19; --plane: #0d0d0d; --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
-      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
-      --answer: #3987e5; --verify: #d95926; --abstain: #199e70; --track: #184f95; --meter: #3987e5; }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane: #0d0d0d; --surface: #1a1a19; --surface2: #232322; --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.09); --shadow: none;
+    --answer: #3987e5; --check: #d95926; --abstain: #199e70; --track: #184f95; --neutral: #6b6a64;
+    --good: #0ca30c; --good-ink: #4cc94c; --bad: #d03b3b; --bad-ink: #ef7d7d;
+    --good-bg: rgba(12,163,12,.14); --bad-bg: rgba(208,59,59,.15); --accent-bg: rgba(57,135,229,.14);
   }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--plane); color: var(--ink); }
-  header { padding: 18px 28px 8px; }
-  header h1 { margin: 0; font-size: 20px; font-weight: 600; }
-  header p { margin: 4px 0 0; color: var(--ink2); font-size: 13px; }
-  main { display: grid; grid-template-columns: 380px 1fr; gap: 18px; padding: 12px 28px 32px; }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
-  .card h2 { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--ink2); text-transform: uppercase; letter-spacing: .04em; }
-  label { display: block; font-size: 12px; color: var(--ink2); margin: 10px 0 4px; }
-  textarea, select { width: 100%; font: inherit; font-size: 14px; padding: 8px; border: 1px solid var(--axis); border-radius: 6px;
-    background: var(--surface); color: var(--ink); }
-  textarea { min-height: 96px; resize: vertical; }
-  .row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
-  .toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
-  button { font: inherit; font-size: 14px; padding: 8px 16px; border-radius: 6px; border: 1px solid var(--axis); background: var(--ink); color: var(--surface); cursor: pointer; }
-  button:disabled { opacity: .5; cursor: progress; }
-  .status { font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 16px; }
-  .right { display: grid; gap: 14px; }
-  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .sample { border: 1px solid var(--grid); border-radius: 8px; padding: 10px 12px; }
-  .sample .v { font-weight: 600; font-size: 15px; }
-  .small { font-size: 12px; color: var(--ink2); }
-  .bar { display: grid; grid-template-columns: 110px 1fr 48px; align-items: center; gap: 10px; margin: 6px 0; font-size: 12px; }
-  .bar .track { height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; }
-  .bar .fill { height: 100%; border-radius: 4px; background: var(--meter); }
-  .bar .val { text-align: right; color: var(--ink2); font-variant-numeric: tabular-nums; }
-  .bar.answer .fill { background: var(--answer); } .bar.verify .fill { background: var(--verify); } .bar.abstain .fill { background: var(--abstain); }
-  .chosen { font-weight: 700; }
-  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--axis); font-size: 13px; font-weight: 600; }
-  .cite { border-left: 3px solid var(--grid); padding: 6px 10px; margin: 6px 0; cursor: pointer; font-size: 13px; }
-  .cite .t { display: none; color: var(--ink2); margin-top: 4px; }
-  .cite.open .t { display: block; }
-  .cite .ghost { color: var(--muted); font-style: italic; }
-  .meter { height: 14px; background: var(--track); border-radius: 7px; overflow: hidden; margin: 8px 0 4px; }
-  .meter .fill { height: 100%; background: var(--meter); }
-  .hero { font-size: 36px; font-weight: 600; }
-  details summary { cursor: pointer; color: var(--ink2); font-size: 13px; }
-  pre { font-size: 11px; white-space: pre-wrap; color: var(--ink2); max-height: 220px; overflow: auto; }
-  .removed { color: var(--verify); font-size: 12px; }
-  footer { padding: 0 28px 24px; color: var(--muted); font-size: 12px; }
+  html, body { margin: 0; }
+  [hidden] { display: none !important; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif; background: var(--plane); color: var(--ink);
+    font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; }
+  a { color: var(--answer); }
+
+  /* ---------- top bar ---------- */
+  .top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 18px; padding: 12px 28px;
+    background: color-mix(in srgb, var(--plane) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 16px; letter-spacing: -.01em; white-space: nowrap; }
+  .logo { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--ink); color: var(--surface); }
+  .logo svg { width: 16px; height: 16px; }
+  .tabs { display: flex; gap: 4px; margin-left: 8px; }
+  .tab { border: 0; background: none; padding: 7px 14px; border-radius: 8px; cursor: pointer; color: var(--ink2); font-weight: 550; }
+  .tab:hover { background: var(--surface2); }
+  .tab.on { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--border), var(--shadow); }
+  .spacer { flex: 1; }
+  .linkbtn { display: inline-flex; align-items: center; gap: 7px; text-decoration: none; color: var(--ink); border: 1px solid var(--border);
+    background: var(--surface); padding: 7px 13px; border-radius: 8px; font-weight: 550; font-size: 14px; cursor: pointer; }
+  .linkbtn:hover { border-color: var(--axis); }
+  .linkbtn.primary { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+  .icon-btn { width: 36px; height: 36px; padding: 0; justify-content: center; }
+
+  .view { display: none; }
+  .view.on { display: block; animation: fade .25s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  /* ---------- shared ---------- */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+  .eyebrow { font-size: 12px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .seg { display: inline-flex; background: var(--surface2); border-radius: 10px; padding: 3px; gap: 2px; }
+  .seg button { border: 0; background: none; padding: 6px 13px; border-radius: 8px; cursor: pointer; color: var(--ink2); font-weight: 550; font-size: 14px; white-space: nowrap; }
+  .seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--border), 0 1px 3px rgba(0,0,0,.06); }
+  .seg button:disabled { opacity: .4; cursor: not-allowed; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 11px; border-radius: 999px; font-weight: 600; font-size: 14px;
+    border: 1px solid var(--axis); background: var(--surface); white-space: nowrap; }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--neutral); }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 6px; background: var(--surface2); color: var(--ink2); }
+  .muted { color: var(--muted); } .ink2 { color: var(--ink2); } .small { font-size: 13px; }
+  .num { font-variant-numeric: tabular-nums; }
+  kbd { font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--axis);
+    border-bottom-width: 2px; background: var(--surface); color: var(--ink2); }
+  .status { display: inline-flex; align-items: center; gap: 6px; font-weight: 650; font-size: 13px; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+  .status.good { color: var(--good-ink); background: var(--good-bg); }
+  .status.bad { color: var(--bad-ink); background: var(--bad-bg); }
+  .status.neutral { color: var(--ink2); background: var(--surface2); }
+
+  /* ---------- overview ---------- */
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 40px 28px 64px; }
+  .hero h1 { font-size: 44px; line-height: 1.1; letter-spacing: -.025em; margin: 10px 0 14px; font-weight: 700; max-width: 820px; }
+  .hero p.lead { font-size: 19px; color: var(--ink2); max-width: 760px; margin: 0 0 24px; }
+  .cta { display: flex; gap: 10px; flex-wrap: wrap; }
+  .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin: 44px 0 18px; }
+  .flow .step { padding: 18px; position: relative; }
+  .flow .step .n { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 13px;
+    background: var(--surface2); color: var(--ink2); margin-bottom: 10px; }
+  .flow .step h3 { margin: 0 0 4px; font-size: 15px; }
+  .flow .step p { margin: 0; font-size: 13px; color: var(--ink2); }
+  .flow .step:not(:last-child)::after { content: "→"; position: absolute; right: -12px; top: 22px; color: var(--muted); font-weight: 700; }
+  .rules { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 14px; }
+  .rule { padding: 18px 20px; }
+  .rule h3 { margin: 6px 0 4px; font-size: 16px; }
+  .rule p { margin: 0; color: var(--ink2); font-size: 14px; }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 14px; }
+  .tile { padding: 20px 22px; }
+  .tile .label { font-size: 14px; color: var(--ink2); font-weight: 550; }
+  .tile .value { font-size: 34px; font-weight: 650; letter-spacing: -.02em; margin: 6px 0 2px; }
+  .tile .value .from { color: var(--muted); font-weight: 500; font-size: 22px; }
+  .tile .value .arrow { color: var(--muted); font-weight: 400; margin: 0 6px; font-size: 22px; }
+  .tile .note { font-size: 13px; color: var(--muted); }
+  h2.section { font-size: 22px; letter-spacing: -.01em; margin: 48px 0 4px; }
+  p.section-sub { margin: 0 0 6px; color: var(--ink2); }
+
+  /* ---------- walkthrough ---------- */
+  .walk { display: grid; grid-template-columns: 330px 1fr; min-height: calc(100vh - 61px); }
+  .side { border-right: 1px solid var(--border); padding: 18px 16px 40px; overflow-y: auto; max-height: calc(100vh - 61px); position: sticky; top: 61px; }
+  .side .modelpick { margin-bottom: 16px; }
+  .side .modelpick .seg { display: flex; }
+  .side .modelpick .seg button { flex: 1; padding: 6px 4px; font-size: 13px; }
+  .story { margin: 18px 0 6px; }
+  .story-h { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 14px; }
+  .story-h .ic { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 12px; background: var(--surface2); }
+  .story-sub { font-size: 12.5px; color: var(--muted); margin: 2px 0 6px 30px; line-height: 1.4; }
+  .case-btn { display: block; width: 100%; text-align: left; border: 1px solid transparent; background: none; border-radius: 10px;
+    padding: 8px 10px 8px 30px; cursor: pointer; font-size: 13.5px; line-height: 1.35; color: var(--ink); position: relative; }
+  .case-btn:hover { background: var(--surface2); }
+  .case-btn.on { background: var(--surface); border-color: var(--border); box-shadow: var(--shadow); }
+  .case-btn.on::before { content: ""; position: absolute; left: 12px; top: 13px; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); }
+  .case-btn .dom { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .case-btn .clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .empty-story { font-size: 12.5px; color: var(--muted); margin-left: 30px; font-style: italic; }
+
+  .stage { padding: 22px 32px 120px; max-width: 1060px; width: 100%; }
+  .claim-card { padding: 24px 28px; }
+  .claim-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .claim-text { font-size: 27px; line-height: 1.3; font-weight: 600; letter-spacing: -.015em; margin: 0; }
+  .claim-text::before { content: "“"; color: var(--muted); margin-right: 2px; } .claim-text::after { content: "”"; color: var(--muted); }
+  .claim-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+  .evtoggle .seg button.on.removed { color: var(--bad-ink); }
+
+  .controls { position: sticky; top: 61px; z-index: 10; display: flex; align-items: center; gap: 14px; margin: 16px 0 6px; padding: 10px 14px;
+    background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(8px); }
+  .stepper { display: flex; gap: 4px; flex: 1; }
+  .stepper .s { flex: 1; display: flex; flex-direction: column; gap: 6px; cursor: pointer; border: 0; background: none; padding: 2px 0; text-align: left; }
+  .stepper .s .bar { height: 4px; border-radius: 4px; background: var(--grid); transition: background .3s; }
+  .stepper .s.done .bar { background: var(--ink); }
+  .stepper .s.skip .bar { background: repeating-linear-gradient(135deg, var(--grid) 0 4px, transparent 4px 8px); }
+  .stepper .s span { font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+  .stepper .s.done span { color: var(--ink); }
+  .controls .btns { display: flex; gap: 6px; }
+
+  .panel { margin-top: 14px; padding: 20px 24px; animation: rise .35s ease both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .panel-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .panel-h .k { font-weight: 700; font-size: 13px; color: var(--muted); }
+  .panel-h h3 { margin: 0; font-size: 18px; letter-spacing: -.01em; }
+  .panel-h .why { margin-left: auto; font-size: 13px; color: var(--muted); text-align: right; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .sub { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; background: var(--surface); }
+  .sub.tint { background: var(--surface2); border-color: transparent; }
+
+  .ev { padding: 10px 14px; border-left: 3px solid var(--grid); margin: 8px 0; cursor: pointer; border-radius: 0 8px 8px 0; }
+  .ev:hover { background: var(--surface2); }
+  .ev .t { font-weight: 600; font-size: 14px; }
+  .ev .x { font-size: 13.5px; color: var(--ink2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ev.open .x { -webkit-line-clamp: unset; }
+  .banner { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; background: var(--bad-bg); color: var(--bad-ink); font-weight: 600; font-size: 14px; margin-bottom: 8px; }
+
+  .sample .top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+  .meter-row { display: grid; grid-template-columns: 120px 1fr 44px; align-items: center; gap: 10px; font-size: 13px; color: var(--ink2); margin: 5px 0; }
+  .meter { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; position: relative; }
+  .meter .f { height: 100%; border-radius: 4px; background: var(--answer); transition: width .6s ease; }
+  .meter .tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); border-radius: 1px; }
+  .rationale { font-size: 13.5px; color: var(--ink2); margin: 10px 0 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .chip { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; padding: 5px 11px; border-radius: 8px; background: var(--surface2); color: var(--ink2); }
+  .chip b { color: var(--ink); font-weight: 650; }
+
+  .options { display: grid; gap: 10px; }
+  .opt { display: grid; grid-template-columns: 190px 1fr 70px; align-items: center; gap: 14px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); position: relative; }
+  .opt.chosen { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+  .opt .name { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .opt .name .sw { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .opt .val { text-align: right; font-weight: 650; }
+  .opt .chosen-tag { position: absolute; right: -1px; top: -10px; font-size: 11px; font-weight: 700; background: var(--ink); color: var(--surface); padding: 1px 8px; border-radius: 6px; }
+  .evbar { position: relative; height: 22px; }
+  .evbar .zero { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: var(--axis); }
+  .evbar .f { position: absolute; top: 5px; height: 12px; border-radius: 4px; transition: all .6s ease; }
+  .axis-labels { display: grid; grid-template-columns: 190px 1fr 70px; gap: 14px; padding: 0 14px; font-size: 11.5px; color: var(--muted); }
+  .axis-labels .scale { display: flex; justify-content: space-between; }
+  .callout { margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: var(--accent-bg); font-size: 14px; color: var(--ink); }
+
+  .trace { list-style: none; padding: 0; margin: 0; position: relative; }
+  .trace li { position: relative; padding: 6px 0 6px 34px; font-size: 14px; }
+  .trace li::before { content: ""; position: absolute; left: 11px; top: 0; bottom: 0; width: 2px; background: var(--grid); }
+  .trace li:first-child::before { top: 16px; } .trace li:last-child::before { bottom: calc(100% - 16px); }
+  .trace .ti { position: absolute; left: 0; top: 5px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 12px;
+    background: var(--surface); border: 2px solid var(--grid); z-index: 1; }
+  .trace code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+  .quote { border-left: 3px solid var(--check); padding: 8px 14px; margin: 8px 0; background: var(--surface2); border-radius: 0 8px 8px 0; font-size: 14px; }
+  .quote .src { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .rule-tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--check); margin-bottom: 4px; }
+  .dist { display: grid; gap: 4px; margin-top: 8px; }
+  .dist .meter-row { grid-template-columns: 100px 1fr 44px; }
+
+  .verdict-main { display: grid; grid-template-columns: 1.25fr 1fr; gap: 14px; }
+  .final { padding: 20px 22px; border-radius: 14px; border: 2px solid var(--ink); background: var(--surface); }
+  .final .big { font-size: 30px; font-weight: 700; letter-spacing: -.02em; margin: 4px 0 6px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .final .cred { font-size: 15px; color: var(--ink2); }
+  .final .cred b { font-size: 22px; color: var(--ink); }
+  .vs { display: grid; gap: 10px; }
+  .vs .sub { display: flex; flex-direction: column; gap: 6px; }
+  .vs .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .reveal { margin-top: 14px; padding: 16px 20px; border-radius: 12px; border: 1px dashed var(--axis); }
+  .reveal.shown { border-style: solid; border-color: var(--border); background: var(--surface2); animation: rise .35s ease both; }
+  .takeaway { margin-top: 14px; padding: 14px 18px; border-radius: 12px; font-size: 15px; font-weight: 550; }
+  .takeaway.good { background: var(--good-bg); } .takeaway.bad { background: var(--bad-bg); } .takeaway.neutral { background: var(--surface2); }
+  .hint { margin-top: 26px; font-size: 13px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
+
+  /* ---------- results ---------- */
+  .res-head { display: flex; align-items: end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+  .hero-fig { margin: 22px 0 6px; padding: 26px 28px; display: flex; gap: 40px; align-items: center; flex-wrap: wrap; }
+  .hero-fig .num-big { font-size: 56px; font-weight: 700; letter-spacing: -.03em; line-height: 1; }
+  .hero-fig .num-big .from { color: var(--muted); font-weight: 500; }
+  .hero-fig .num-big .arrow { color: var(--muted); font-weight: 300; margin: 0 10px; }
+  .hero-fig p { margin: 6px 0 0; color: var(--ink2); max-width: 520px; }
+  .legend { display: flex; gap: 18px; font-size: 13px; color: var(--ink2); align-items: center; margin: 18px 0 8px; }
+  .legend .k { display: inline-flex; align-items: center; gap: 7px; }
+  .legend .sw { width: 12px; height: 12px; border-radius: 3px; }
+  .models { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .mcard { padding: 20px 22px; }
+  .mcard h3 { margin: 0; font-size: 18px; }
+  .mcard .sz { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
+  .metric { margin: 16px 0 0; }
+  .metric .mh { display: flex; justify-content: space-between; align-items: baseline; font-size: 13.5px; font-weight: 600; }
+  .metric .mh .better { font-size: 11.5px; font-weight: 500; color: var(--muted); }
+  .pair { display: grid; gap: 2px; margin-top: 6px; }
+  .pbar { display: grid; grid-template-columns: 1fr 52px; align-items: center; gap: 10px; position: relative; }
+  .pbar .tr { height: 12px; position: relative; }
+  .pbar .f { position: absolute; left: 0; top: 0; height: 100%; border-radius: 0 4px 4px 0; transition: width .6s ease; }
+  .pbar .v { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; color: var(--ink2); }
+  .pbar.agent .v { color: var(--ink); font-weight: 650; }
+  .pbar:hover .tip { opacity: 1; }
+  .tip { position: absolute; left: 0; bottom: 18px; background: var(--ink); color: var(--surface); font-size: 12px; padding: 4px 8px; border-radius: 6px;
+    white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 5; }
+  .findings { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 14px; }
+  .finding { padding: 18px 20px; }
+  .finding .n { font-weight: 700; color: var(--muted); font-size: 13px; }
+  .finding h4 { margin: 4px 0 6px; font-size: 16px; }
+  .finding p { margin: 0; color: var(--ink2); font-size: 14px; }
+  table.data { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 10px; }
+  table.data th, table.data td { padding: 7px 10px; border-bottom: 1px solid var(--grid); text-align: right; font-variant-numeric: tabular-nums; }
+  table.data th:first-child, table.data td:first-child { text-align: left; }
+  table.data th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  details.tbl summary { cursor: pointer; color: var(--ink2); font-size: 14px; margin-top: 18px; }
+
+  @media (max-width: 1000px) {
+    .walk { grid-template-columns: 1fr; } .side { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--border); }
+    .flow, .rules, .tiles, .models, .findings, .grid3 { grid-template-columns: 1fr; } .grid2, .verdict-main { grid-template-columns: 1fr; }
+    .flow .step::after { display: none; } .hero h1 { font-size: 34px; } .tabs { display: none; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>Know-When-To-Check</h1>
-  <p>A frozen LLM wrapped in a learned answer / verify / abstain controller. Toggle the evidence off and watch the agent change its mind.</p>
+<header class="top">
+  <div class="brand"><div class="logo"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/><path d="M5 7l1.5 1.5L9.3 5.7"/></svg></div>Know-When-To-Check</div>
+  <nav class="tabs">
+    <button class="tab on" data-view="overview">Overview</button>
+    <button class="tab" data-view="walk">Live walkthrough</button>
+    <button class="tab" data-view="results">Results</button>
+  </nav>
+  <div class="spacer"></div>
+  <a class="linkbtn" id="reportLink" href="/report" target="_blank" hidden>Full report ↗</a>
+  <a class="linkbtn" href="https://www.loom.com/share/71e798df14b74ed9a6d4e24f5f4ff662" target="_blank" rel="noopener">▶ Video</a>
+  <button class="linkbtn icon-btn" id="themeBtn" title="Toggle dark mode" aria-label="Toggle dark mode">◐</button>
 </header>
-<main>
-  <section class="card">
-    <h2>Claim</h2>
-    <label for="curated">Curated test claims (each has an evidence-ablated twin)</label>
-    <select id="curated"><option value="">— type your own claim below —</option></select>
-    <label for="claim">Claim text</label>
-    <textarea id="claim" placeholder="e.g. Aspirin reduces the risk of myocardial infarction in patients with diabetes."></textarea>
-    <div class="row">
-      <label class="toggle" style="margin:0"><input type="checkbox" id="remove"> Remove supporting evidence</label>
-    </div>
-    <div class="row"><button id="run">Run agent</button><span class="small" id="mode"></span></div>
-    <div class="status" id="status"></div>
-    <p class="small">With a curated claim, the toggle runs the case's twin: the gold abstracts are removed from the record store. With a free-text claim, it removes the abstracts the agent cited and re-runs.</p>
-  </section>
 
-  <section class="right">
-    <div class="two">
-      <div class="card"><h2>Provisional sample A</h2><div id="sampleA" class="sample small">—</div></div>
-      <div class="card"><h2>Provisional sample B</h2><div id="sampleB" class="sample small">—</div></div>
+<!-- ============================== OVERVIEW ============================== -->
+<section class="view on" id="view-overview">
+  <div class="wrap">
+    <div class="hero">
+      <div class="eyebrow">AI fact-checking you can trust when it speaks</div>
+      <h1>An AI that knows when its own answer is worth checking, and when to say “I don’t know”.</h1>
+      <p class="lead">Language models answer confidently even when they are guessing. Know-When-To-Check wraps a frozen model in a small learned controller. For every claim it decides whether to answer, look the evidence up first, or decline. Every verdict comes with the sentence it rests on and an honest probability of being right.</p>
+      <div class="cta">
+        <button class="linkbtn primary" data-goto="walk">Start the walkthrough →</button>
+        <button class="linkbtn" data-goto="results">See the results</button>
+      </div>
     </div>
-    <div class="two">
-      <div class="card"><h2>Signals</h2><div id="signals" class="small">—</div></div>
-      <div class="card"><h2>Action preference <span class="small">(controller probabilities, not confidence)</span></h2><div id="actions" class="small">—</div></div>
+
+    <div class="flow">
+      <div class="card step"><div class="n">1</div><h3>Read</h3><p>The model sees a claim and the top-3 retrieved abstracts.</p></div>
+      <div class="card step"><div class="n">2</div><h3>Ask twice</h3><p>Two independent answers. How much do they agree, how sure, is the evidence enough?</p></div>
+      <div class="card step"><div class="n">3</div><h3>Decide</h3><p>Answer, check first, or decline, whichever has the highest expected reward.</p></div>
+      <div class="card step"><div class="n">4</div><h3>Check</h3><p>Search and read the library, quote a sentence, and let a blind judge re-read it.</p></div>
+      <div class="card step"><div class="n">5</div><h3>Verdict</h3><p>Supported, refuted or not enough evidence, with its source and a calibrated credence.</p></div>
     </div>
-    <div class="two">
-      <div class="card"><h2>Final verdict</h2><div id="final">—</div></div>
-      <div class="card"><h2>Calibrated P(correct)</h2><div id="pcorrect">—</div></div>
+
+    <h2 class="section">Three rules make checking actually help</h2>
+    <p class="section-sub">Without them, looking things up made the models <em>worse</em>: they talked themselves into confident verdicts from loosely related text.</p>
+    <div class="rules">
+      <div class="card rule"><span class="rule-tag">Rule 1</span><h3>No quote, no verdict</h3><p>A “supported” or “refuted” must cite a sentence the agent actually read. Otherwise the honest answer is “not enough evidence”.</p></div>
+      <div class="card rule"><span class="rule-tag">Rule 2</span><h3>A blind judge</h3><p>A separate call sees only the claim and the quoted sentence, with no search story to anchor on, and decides what it says.</p></div>
+      <div class="card rule"><span class="rule-tag">Rule 3</span><h3>A check is evidence, not an oracle</h3><p>After checking, a second decision weighs the new verdict against the first: commit, keep the prior, or decline.</p></div>
     </div>
-    <div class="card"><details><summary>Tool log and raw result</summary><pre id="raw"></pre></details></div>
-  </section>
-</main>
-<footer id="foot"></footer>
+
+    <h2 class="section">What it buys you</h2>
+    <p class="section-sub" id="ovSub">Real runs of three frozen open models on held-out biomedical claims.</p>
+    <div class="tiles" id="ovTiles"></div>
+  </div>
+</section>
+
+<!-- ============================== WALKTHROUGH ============================== -->
+<section class="view" id="view-walk">
+  <div class="walk">
+    <aside class="side">
+      <div class="modelpick"><div class="eyebrow" style="margin-bottom:6px">Frozen model</div><div class="seg" id="modelSeg"></div></div>
+      <div id="storyList"></div>
+    </aside>
+    <div class="stage" id="stage"></div>
+  </div>
+</section>
+
+<!-- ============================== RESULTS ============================== -->
+<section class="view" id="view-results">
+  <div class="wrap">
+    <div class="res-head">
+      <div><div class="eyebrow">Held-out test sets · same prompts, tools and budget for every model</div>
+        <h2 class="section" style="margin-top:6px">Raw model vs. the same model inside Know-When-To-Check</h2></div>
+      <div class="seg" id="domainSeg"></div>
+    </div>
+    <div class="card hero-fig" id="heroFig"></div>
+    <div class="legend">
+      <span class="k"><span class="sw" style="background:var(--neutral)"></span>Raw model (always answers)</span>
+      <span class="k"><span class="sw" style="background:var(--answer)"></span>With our agent</span>
+      <span class="muted">Hover a bar for details</span>
+    </div>
+    <div class="models" id="modelCards"></div>
+    <details class="tbl"><summary>Show as table</summary><div id="resTable"></div></details>
+
+    <h2 class="section">What we found</h2>
+    <div class="findings" id="findings"></div>
+  </div>
+</section>
+
+<script src="replay.js"></script>
 <script>
-const $ = (id) => document.getElementById(id);
-const fmt = (x, d = 2) => (x === null || x === undefined) ? "—" : Number(x).toFixed(d);
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const D = window.REPLAY;
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pct = (x, d = 0) => (x === null || x === undefined || isNaN(x)) ? "—" : (x * 100).toFixed(d) + "%";
+const clamp01 = (x) => Math.max(0, Math.min(1, x ?? 0));
 
-async function loadClaims() {
-  try {
-    const r = await fetch("/api/claims"); const list = await r.json();
-    for (const c of list) { const o = document.createElement("option"); o.value = c.case_id; o.textContent = c.claim; $("curated").appendChild(o); }
-  } catch (e) { $("status").textContent = "could not load curated claims: " + e; }
-  try { const h = await (await fetch("/api/health")).json();
-    $("foot").textContent = h.ok ? `frozen LLM: ${h.llm.backend} / ${h.llm.model} (${h.llm.revision}) · controller w=${h.controller.w} c=${h.controller.c} K=${h.controller.K} · prompt ${h.controller.prompt_hash}` : `agent not ready: ${h.error}`;
-  } catch (e) {}
-}
-$("curated").addEventListener("change", () => { const o = $("curated").selectedOptions[0]; if (o && o.value) $("claim").value = o.textContent; });
-$("claim").addEventListener("input", () => { $("curated").value = ""; });
+const VERDICT = { supported: "Supported", refuted: "Refuted", insufficient_evidence: "Not enough evidence", abstain: "Declined: “I don’t know”" };
+const DECISION = {
+  answer_grounded: { label: "Answer now", color: "var(--answer)" },
+  check_commit: { label: "Checked → used the new verdict", color: "var(--check)" },
+  check_keep_prior: { label: "Checked → kept its first answer", color: "var(--check)" },
+  check_abstain: { label: "Checked → declined", color: "var(--check)" },
+  abstain: { label: "Declined to answer", color: "var(--abstain)" },
+};
+const STORIES = [
+  { key: "caught", ic: "🛑", title: "Caught a confident guess", sub: "The raw model was sure and wrong. The agent declined instead." },
+  { key: "fixed", ic: "🔎", title: "Checked, and it fixed the answer", sub: "Looking the evidence up turned a wrong first answer into a right one." },
+  { key: "kept", ic: "⚖️", title: "A check is evidence, not an oracle", sub: "A naive look-up would have broken a right answer. The agent kept it." },
+  { key: "twin", ic: "✂️", title: "Delete the evidence", sub: "Remove the decisive abstract. The raw model keeps its verdict; the agent does not." },
+  { key: "confident", ic: "✅", title: "Answers when it should", sub: "Clear evidence: answer straight away, no wasted checks." },
+  { key: "miss", ic: "⚠️", title: "Where it still fails", sub: "Honest failures: confident, grounded, and still wrong." },
+];
+const DOMAIN_SHORT = { test_id: "SciFact", test_ood: "HealthVer", test_climate: "Climate-FEVER", test_vitc: "VitaminC" };
+const STEPS = ["Evidence", "Ask twice", "Decide", "Check", "Verdict"];
+const MODEL_SHORT = { gemma26b: "Gemma 26B", llama8b: "Llama 8B", llama3b: "Llama 3B" };
 
-function bar(cls, name, v, chosen) {
-  const pct = Math.max(0, Math.min(1, v ?? 0)) * 100;
-  return `<div class="bar ${cls} ${chosen ? "chosen" : ""}"><span>${esc(name)}${chosen ? " ◀" : ""}</span><div class="track"><div class="fill" style="width:${pct}%"></div></div><span class="val">${fmt(v)}</span></div>`;
+const st = { model: D.models[0].key, caseId: null, step: 0, revealed: false, playing: null, domain: "test_id" };
+
+/* ---------------- theme & tabs ---------------- */
+const savedTheme = localStorage.getItem("kwtc-theme");
+if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+$("#themeBtn").onclick = () => {
+  const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = t; localStorage.setItem("kwtc-theme", t);
+};
+function show(view) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.dataset.view === view));
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("on", v.id === "view-" + view));
+  st.view = view; window.scrollTo({ top: 0 });
 }
-function sample(s) {
-  if (!s) return "—";
-  return `<div class="v">${esc(s.verdict)}</div><div>confidence ${fmt(s.confidence)} · sufficiency ${fmt(s.evidence_sufficiency)}</div>
-    <div>cited: ${s.cited_doc_ids.length ? s.cited_doc_ids.join(", ") : "none"}${s.parse_ok ? "" : " · <b>malformed JSON (fallback)</b>"}</div><div>${esc(s.rationale)}</div>`;
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => show(t.dataset.view));
+document.querySelectorAll("[data-goto]").forEach(b => b.onclick = () => show(b.dataset.goto));
+if (location.protocol.startsWith("http")) fetch("/report", { method: "HEAD" }).then(r => { if (r.ok) $("#reportLink").hidden = false; }).catch(() => {});
+
+/* ---------------- overview tiles ---------------- */
+function overview() {
+  const S = (k) => D.models.find(m => m.key === k)?.summary?.test_id;
+  const small = S("llama3b"), all = D.models.map(m => m.summary.test_id).filter(Boolean);
+  const tiles = [];
+  if (small) tiles.push({ label: "Wrong answers, smallest model (Llama 3.2 3B)", from: pct(small.wrong_raw), to: pct(small.wrong_agent),
+    note: "share of claims answered with a wrong verdict" });
+  if (small) tiles.push({ label: "Confidence error, Llama 3.2 3B", from: (small.ece_raw * 100).toFixed(0) + " pts", to: (small.ece_agent * 100).toFixed(0) + " pts",
+    note: "gap between the confidence it states and how often it is right (ECE)" });
+  const fabRaw = Math.max(...all.map(s => s.fab_raw ?? 0)), fabAg = Math.max(...all.map(s => s.fab_agent ?? 0));
+  tiles.push({ label: "Made-up sources, all three models", from: pct(fabRaw, 1), to: pct(fabAg, 0), note: "citations of records the agent never saw (worst model)" });
+  $("#ovTiles").innerHTML = tiles.map(t => `<div class="card tile"><div class="label">${esc(t.label)}</div>
+    <div class="value"><span class="from">${t.from}</span><span class="arrow">→</span>${t.to}</div><div class="note">${esc(t.note)}</div></div>`).join("");
+  const n = D.models.reduce((a, m) => a + (m.n_cases || 0), 0);
+  $("#ovSub").textContent = `Real runs of three frozen open models (Gemma 4 26B, Llama 3.1 8B, Llama 3.2 3B) on ${n.toLocaleString()} held-out claim evaluations across four domains. SciFact shown here.`;
 }
-function render(payload) {
-  const r = payload.result;
-  $("sampleA").innerHTML = sample(r.samples[0]); $("sampleB").innerHTML = sample(r.samples[1]);
-  $("signals").innerHTML = Object.entries(r.signals).filter(([k, v]) => v !== null).map(([k, v]) => bar("", k, v, false)).join("");
-  $("actions").innerHTML = Object.entries(r.action_preference).map(([k, v]) => bar(k, k, v, k === r.action)).join("") +
-    `<div style="margin-top:8px">chosen action: <span class="badge">${esc(r.action)}</span></div>`;
-  const f = r.final;
-  let html = `<div><span class="badge">${esc(f.verdict)}</span> ${f.confidence !== null && f.confidence !== undefined ? `<span class="small">verbalised confidence ${fmt(f.confidence)}</span>` : ""}</div>`;
-  if (f.verdict === "abstain") {
-    html += `<p class="small">${esc(f.rationale)}</p><p class="small">provisional verdicts: ${f.provisional_verdicts.map(p => `${esc(p.verdict)} (${fmt(p.confidence)})`).join(" / ")} · records seen: ${f.records_seen.join(", ")}</p>`;
-  } else {
-    html += `<p class="small">${esc(f.rationale)}</p>`;
-    html += f.cited.length ? f.cited.map((c, i) => `<div class="cite" data-i="${i}"><div>[${esc(c.doc_id)}] ${c.sentence !== null && c.sentence !== undefined ? "sentence " + c.sentence : "document-level"} · ${esc(c.title || "")}${c.accessible ? "" : ' <span class="ghost">(not in this case\'s record store)</span>'}</div><div class="t">${esc(c.text || "(no sentence text)")}</div></div>`).join("") : `<p class="small">no citations</p>`;
+
+/* ---------------- walkthrough ---------------- */
+const cur = () => D.cases[st.caseId];
+const twinOf = (c) => D.cases[`${c.model}:${c.case_id}-abl`];
+const parentOf = (c) => c.parent_id ? D.cases[`${c.model}:${c.parent_id}`] : null;
+const hasCheck = (c) => !!c.check;
+function stepCount(c) { return 5; }
+
+function modelSeg() {
+  $("#modelSeg").innerHTML = D.models.map((m, i) => `<button data-m="${m.key}" class="${m.key === st.model ? "on" : ""}" title="${esc(m.label)} · key ${i + 1}">${MODEL_SHORT[m.key] || esc(m.label)}</button>`).join("");
+  $("#modelSeg").querySelectorAll("button").forEach(b => b.onclick = () => setModel(b.dataset.m));
+}
+function storyCases() { return STORIES.flatMap(s => (D.stories[st.model]?.[s.key] || [])); }
+function storyList() {
+  const S = D.stories[st.model] || {};
+  $("#storyList").innerHTML = STORIES.map(s => {
+    const ids = S[s.key] || [];
+    const items = ids.length ? ids.map(id => { const c = D.cases[id];
+      const active = st.caseId === id || (cur() && cur().parent_id && `${c.model}:${c.case_id}` === `${cur().model}:${cur().parent_id}`);
+      return `<button class="case-btn ${active ? "on" : ""}" data-id="${esc(id)}"><span class="clamp">${esc(c.claim)}</span><span class="dom">${esc(DOMAIN_SHORT[c.split])}</span></button>`; }).join("")
+      : `<div class="empty-story">No such case for this model</div>`;
+    return `<div class="story"><div class="story-h"><span class="ic">${s.ic}</span>${esc(s.title)}</div><div class="story-sub">${esc(s.sub)}</div>${items}</div>`;
+  }).join("");
+  $("#storyList").querySelectorAll(".case-btn").forEach(b => b.onclick = () => openCase(b.dataset.id));
+}
+function setModel(m) {
+  st.model = m; modelSeg();
+  const first = storyCases()[0]; openCase(first);
+}
+function openCase(id, keepStep = false) {
+  stopPlay(); st.caseId = id; if (!keepStep) st.step = 0; st.revealed = false; storyList(); renderStage();
+  if (!keepStep) window.scrollTo({ top: 0, behavior: "smooth" });
+}
+function toggleEvidence() {
+  const c = cur(); if (!c) return;
+  const other = c.parent_id ? parentOf(c) : twinOf(c);
+  if (other) { const step = st.step; openCase(other.id, true); st.step = Math.max(step, 4); st.revealed = false; renderStage(); }
+}
+
+function verdictPill(v) { return `<span class="pill"><span class="dot" style="background:${v === "abstain" ? "var(--abstain)" : "var(--neutral)"}"></span>${esc(VERDICT[v] || v)}</span>`; }
+function correctness(v, correct) {
+  if (v === "abstain") return `<span class="status neutral">○ Declined: scores 0</span>`;
+  return correct ? `<span class="status good">✓ Correct</span>` : `<span class="status bad">✗ Wrong</span>`;
+}
+function meterRow(label, v, color = "var(--answer)", tick = null) {
+  return `<div class="meter-row"><span>${esc(label)}</span><div class="meter"><div class="f" style="width:${clamp01(v) * 100}%;background:${color}"></div>${tick !== null ? `<div class="tick" style="left:calc(${tick * 100}% - 1px)"></div>` : ""}</div><span class="num">${pct(v)}</span></div>`;
+}
+
+function panelEvidence(c) {
+  const removed = c.excluded && c.excluded.length;
+  return `<div class="card panel"><div class="panel-h"><span class="k">1</span><h3>What the model is shown</h3><span class="why">top-${c.evidence.length} retrieved ${c.split === "test_id" ? "abstracts" : "records"} · click to expand</span></div>
+    ${removed ? `<div class="banner">✂️ Evidence deleted: the decisive ${c.split === "test_id" ? "abstract was" : "records were"} removed from the library (${c.excluded.length}). Retrieval now returns the next-best matches.</div>` : ""}
+    ${c.evidence.map(e => `<div class="ev"><div class="t">${esc(e.title || "Record " + e.doc_id)}</div><div class="x">${esc(e.text)}</div></div>`).join("")}</div>`;
+}
+function panelSamples(c) {
+  const s = c.samples, x = c.signals;
+  const sample = (smp, i) => `<div class="sub sample"><div class="top-row"><span class="eyebrow">Answer ${"AB"[i]}</span>${verdictPill(smp.verdict)}</div>
+    ${meterRow("Says it’s sure", smp.confidence)}${meterRow("Evidence enough", smp.sufficiency)}
+    <p class="rationale">${esc(smp.rationale)}</p></div>`;
+  const chip = (k, v) => `<span class="chip">${esc(k)} <b>${v}</b></span>`;
+  return `<div class="card panel"><div class="panel-h"><span class="k">2</span><h3>Ask the frozen model twice</h3><span class="why">two independent samples → six doubt signals</span></div>
+    <div class="grid2">${sample(s[0], 0)}${sample(s[1], 1)}</div>
+    <div class="chips">${chip("Answers agree", x.agree >= 1 ? "yes" : "no")}${chip("Mean confidence", pct(x.conf_mean))}${chip("Evidence sufficiency", pct(x.suff_mean))}${chip("Confidence gap", pct(x.conf_gap))}${chip("Says “not enough evidence”", pct(x.says_insuff))}${x.tok_prob !== undefined ? chip("Token probability", pct(x.tok_prob)) : ""}</div></div>`;
+}
+function panelDecide(c) {
+  const ev = c.agent.ev, w = D.w ?? 1, dec = c.agent.decision;
+  const stage1 = dec === "answer_grounded" ? "answer" : dec === "abstain" ? "abstain" : "check";
+  const opts = [
+    { k: "answer", name: "Answer now", v: ev.ev_answer, color: "var(--answer)" },
+    { k: "check", name: "Check first", v: ev.v_check, color: "var(--check)" },
+    { k: "abstain", name: "Say “I don’t know”", v: 0, color: "var(--abstain)" },
+  ];
+  const bar = (v, color) => { const x = Math.max(-1, Math.min(1, v)); const l = x >= 0 ? 50 : 50 + x * 50, wd = Math.abs(x) * 50;
+    return `<div class="evbar"><div class="zero"></div><div class="f" style="left:${l}%;width:${Math.max(wd, .6)}%;background:${color}"></div></div>`; };
+  const thr = w / (1 + w);
+  const why = stage1 === "answer" ? `P(first answer is right) = <b>${pct(ev.p_answer)}</b> clears the ${pct(thr)} bar, and a check isn’t predicted to add enough to pay for itself.`
+    : stage1 === "check" ? `Checking has the highest expected value: the predicted gain over answering now outweighs the tool cost (${D.c} per call).`
+    : `Neither answering (P(right) = <b>${pct(ev.p_answer)}</b>) nor checking beats saying nothing. A wrong answer costs −${w}; declining costs 0.`;
+  return `<div class="card panel"><div class="panel-h"><span class="k">3</span><h3>Decide: answer, check, or decline?</h3><span class="why">expected reward: +1 right, −${w} wrong, −${D.c} per tool call</span></div>
+    <div class="options">${opts.map(o => `<div class="opt ${o.k === stage1 ? "chosen" : ""}">${o.k === stage1 ? `<span class="chosen-tag">CHOSEN</span>` : ""}
+      <span class="name"><span class="sw" style="background:${o.color}"></span>${o.name}</span>${bar(o.v, o.color)}<span class="val num">${o.v >= 0 ? "+" : "−"}${Math.abs(o.v).toFixed(2)}</span></div>`).join("")}</div>
+    <div class="axis-labels"><span></span><span class="scale"><span>−1 (sure to be wrong)</span><span>0</span><span>+1 (sure to be right)</span></span><span></span></div>
+    <div style="margin-top:14px">${meterRow("P(answer right)", ev.p_answer, "var(--answer)", thr)}</div>
+    <div class="callout">${why}</div></div>`;
+}
+function panelCheck(c) {
+  if (!hasCheck(c)) {
+    return `<div class="card panel"><div class="panel-h"><span class="k">4</span><h3>Check</h3><span class="why">skipped</span></div>
+      <p class="ink2" style="margin:0">${c.agent.decision === "abstain" ? "The agent declined before checking: no look-up was expected to rescue this claim." : "No check needed: the agent answered from what it had already read, saving the tool calls."}</p></div>`;
   }
-  if (payload.removed_doc_ids && payload.removed_doc_ids.length) html += `<p class="removed">evidence removed from the record store: ${payload.removed_doc_ids.join(", ")}</p>`;
-  $("final").innerHTML = html;
-  for (const el of document.querySelectorAll(".cite")) el.addEventListener("click", () => el.classList.toggle("open"));
-  if (r.p_correct === null || r.p_correct === undefined) {
-    $("pcorrect").innerHTML = `<div class="hero">—</div><div class="small">${r.action === "abstain" ? "no verdict was delivered" : "no calibrator loaded"}</div>`;
-  } else {
-    $("pcorrect").innerHTML = `<div class="hero">${(r.p_correct * 100).toFixed(0)}%</div><div class="meter"><div class="fill" style="width:${r.p_correct * 100}%"></div></div><div class="small">logistic calibrator fit on validation (signals + action); separate from the controller</div>`;
-  }
-  $("raw").textContent = JSON.stringify({tool_log: r.tool_log, llm_calls: r.llm_calls, tool_calls: r.tool_calls, tokens: r.tokens, latency_s: r.latency_s, excluded_doc_ids: r.excluded_doc_ids, initial_evidence: r.initial_evidence, with_evidence: payload.with_evidence ? {action: payload.with_evidence.action, verdict: payload.with_evidence.final.verdict} : undefined}, null, 2);
-  $("status").textContent = `done in ${r.latency_s}s · ${r.llm_calls} LLM calls · ${r.tool_calls} tool calls`;
+  const k = c.check, icon = { search_records: "🔍", read_record: "📖", calculate: "🧮" };
+  const steps = k.steps.map(s => `<li><span class="ti">${icon[s.tool] || "•"}</span>${s.tool === "search_records" ? `Search <code>${esc(s.query)}</code> <span class="muted">→ ${s.hits} hits</span>`
+    : s.tool === "read_record" ? `Read <b>${esc(s.title || ("record " + s.doc_id))}</b>` : `${esc(s.tool)} <code>${esc(JSON.stringify(s.args))}</code>`}</li>`).join("");
+  const quotes = k.quotes.length ? k.quotes.map(q => `<div class="quote">“${esc(q.text || "(sentence unavailable)")}”<div class="src">${esc(q.title || "")} · sentence ${q.sentence}</div></div>`).join("")
+    : (k.verdict === "supported" || k.verdict === "refuted")
+      ? `<div class="quote" style="border-color:var(--bad)">The checker said <b>${esc(VERDICT[k.verdict])}</b> but quoted no sentence it actually read → downgraded to <b>Not enough evidence</b>.</div>`
+      : `<div class="quote">The checker found no sentence that settles the claim, so there is nothing to quote and the honest verdict is <b>Not enough evidence</b>.</div>`;
+  const j = k.judge;
+  const judge = j ? `<div class="sub"><span class="rule-tag">Rule 2 · Blind judge</span><div class="ink2 small">Sees only the claim and the quote:</div>
+      <div style="margin:6px 0"><b>${esc({ supports: "Supports the claim", refutes: "Refutes the claim", not_addressed: "Doesn’t address the claim" }[j.relation] || j.relation)}</b></div>
+      ${j.credence ? `<div class="dist">${meterRow("supports", j.credence.supports, "var(--neutral)")}${meterRow("refutes", j.credence.refutes, "var(--neutral)")}${meterRow("not addressed", j.credence.not_addressed, "var(--neutral)")}</div>` : ""}
+      <p class="rationale">${esc(j.reason)}</p></div>`
+    : `<div class="sub tint"><span class="rule-tag">Rule 2 · Blind judge</span><p class="ink2 small" style="margin:4px 0 0">Not needed: there was no grounded supported/refuted quote to judge.</p></div>`;
+  const ev = c.agent.ev, w = D.w ?? 1;
+  const s2 = [
+    { k: "check_commit", name: "Use the checked verdict", p: ev.p_commit },
+    { k: "check_keep_prior", name: "Keep the first answer", p: ev.p_keep },
+    { k: "check_abstain", name: "Decline", p: null },
+  ];
+  return `<div class="card panel"><div class="panel-h"><span class="k">4</span><h3>Check the evidence</h3><span class="why">${k.steps.length} tool call${k.steps.length === 1 ? "" : "s"} · budget K = 4</span></div>
+    <div class="grid2">
+      <div class="sub"><div class="eyebrow" style="margin-bottom:8px">Search trace</div><ul class="trace">${steps || "<li class='muted'>no tool calls</li>"}</ul>
+        <div style="margin-top:12px" class="small ink2">Checker’s own verdict: ${verdictPill(k.verdict)}</div></div>
+      <div class="sub"><span class="rule-tag">Rule 1 · No quote, no verdict</span>${quotes}</div>
+    </div>
+    <div class="grid2" style="margin-top:12px">${judge}
+      <div class="sub"><span class="rule-tag">Rule 3 · A check is evidence, not an oracle</span><div class="ink2 small" style="margin-bottom:8px">Second decision, by expected reward:</div>
+        ${s2.map(o => `<div class="opt ${o.k === c.agent.decision ? "chosen" : ""}" style="grid-template-columns:1fr 70px;margin-top:8px">${o.k === c.agent.decision ? `<span class="chosen-tag">CHOSEN</span>` : ""}
+          <span class="name">${o.name}</span><span class="val num">${o.p === null ? "0.00" : ((1 + w) * o.p - w >= 0 ? "+" : "−") + Math.abs((1 + w) * o.p - w).toFixed(2)}</span></div>`).join("")}
+        <div class="small muted" style="margin-top:8px">P(checked verdict right) ${pct(ev.p_commit)} · P(first answer right | check) ${pct(ev.p_keep)}</div></div>
+    </div></div>`;
 }
-$("run").addEventListener("click", async () => {
-  const body = { claim: $("claim").value, case_id: $("curated").value || null, remove_evidence: $("remove").checked };
-  $("run").disabled = true; $("status").textContent = "running the frozen agent…"; $("mode").textContent = body.case_id ? "curated case" : "live claim";
-  try {
-    const res = await fetch("/api/infer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (!res.ok) throw new Error(await res.text());
-    render(await res.json());
-  } catch (e) { $("status").textContent = "error: " + e.message; }
-  $("run").disabled = false;
+function panelVerdict(c) {
+  const a = c.agent, d = DECISION[a.decision] || { label: a.decision, color: "var(--ink)" };
+  const cites = a.cited.filter(q => q.text || q.title).slice(0, 2).map(q => `<div class="quote" style="border-color:${d.color}">${q.text ? "“" + esc(q.text) + "”" : `<i>Cites the abstract as a whole</i>`}<div class="src">${esc(q.title || "")}${q.sentence !== null && q.sentence !== undefined ? " · sentence " + q.sentence : ""}</div></div>`).join("");
+  const R = st.revealed;
+  const raw = c.raw, nc = c.naive_check;
+  const gold = c.gold;
+  let take = "", cls = "neutral";
+  if (R) {
+    if (a.verdict === "abstain") {
+      if (!raw.correct) { take = `Good call. The raw model would have answered <b>${esc(VERDICT[raw.verdict])}</b> at ${pct(raw.confidence)} confidence and been wrong. Declining scores 0 instead of −1.`; cls = "good"; }
+      else { take = `A missed chance: the raw model happened to be right here. This is the price of caution, and the cost-accuracy trade-off is a tunable knob (w).`; }
+    } else if (a.correct && !raw.correct) { take = `The agent got it right where the raw model was confidently wrong.`; cls = "good"; }
+    else if (a.correct && !nc.correct) { take = `Right, and a naive “always look it up” checker would have talked itself into <b>${esc(VERDICT[nc.verdict])}</b> and been wrong.`; cls = "good"; }
+    else if (a.correct) { take = `Right, and it says so with an honest ${pct(a.credence)} credence.`; cls = "good"; }
+    else { take = `Wrong. The agent is confident, grounded in a real sentence, and still mistaken. We report these failures rather than hide them.`; cls = "bad"; }
+  }
+  const twin = twinOf(c), parent = parentOf(c);
+  const evHint = twin ? `<div class="takeaway neutral">✂️ Now delete the evidence: press <kbd>E</kbd> or use the toggle above. Same claim, decisive abstract removed.</div>`
+    : parent ? `<div class="takeaway neutral">The evidence is gone. The raw model still says <b>${esc(VERDICT[c.raw.verdict])}</b> (${pct(c.raw.confidence)} sure), as it did with the evidence. Press <kbd>E</kbd> to compare.</div>` : "";
+  return `<div class="card panel"><div class="panel-h"><span class="k">5</span><h3>Verdict</h3><span class="why">${a.llm_calls} LLM calls · ${a.tool_calls} tool calls · ${a.tokens.toLocaleString()} tokens</span></div>
+    <div class="verdict-main">
+      <div class="final"><div class="eyebrow">Our agent · ${esc(d.label)}</div>
+        <div class="big">${esc(VERDICT[a.verdict] || a.verdict)} ${R ? correctness(a.verdict, a.correct) : ""}</div>
+        <div class="cred">${a.credence !== null && a.credence !== undefined ? `Calibrated credence <b>${pct(a.credence)}</b> that this verdict is right` : `No verdict delivered, so there is nothing to be confident about`}</div>
+        ${cites}</div>
+      <div class="vs">
+        <div class="sub"><div class="eyebrow">Raw model alone · always answers</div><div class="row">${verdictPill(raw.verdict)}${R ? correctness(raw.verdict, raw.correct) : ""}</div><div class="small muted">states ${pct(raw.confidence)} confidence</div></div>
+        <div class="sub"><div class="eyebrow">Naive checker · always looks it up, no rules</div><div class="row">${verdictPill(nc.verdict)}${R ? correctness(nc.verdict, nc.correct) : ""}</div><div class="small muted">states ${pct(nc.confidence)} confidence</div></div>
+      </div>
+    </div>
+    <div class="reveal ${R ? "shown" : ""}">${R ? `<div class="eyebrow">Ground truth (hidden from every model)</div><div style="margin:6px 0">${verdictPill(gold.label)}</div>
+        ${gold.sentences.filter(g => g.text).slice(0, 2).map(g => `<div class="quote" style="border-color:var(--good)">“${esc(g.text)}”<div class="src">annotated rationale · ${esc(g.title || "")}</div></div>`).join("")}`
+      : `<button class="linkbtn primary" id="revealBtn">Reveal the ground truth</button> <span class="muted small" style="margin-left:8px">or press <kbd>R</kbd></span>`}</div>
+    ${R ? `<div class="takeaway ${cls}">${take}</div>` : ""}${evHint}</div>`;
+}
+
+function renderStage() {
+  const c = cur(); if (!c) { $("#stage").innerHTML = `<p class="muted">No cases for this model.</p>`; return; }
+  const twin = twinOf(c), parent = parentOf(c), pair = twin || parent;
+  const removed = !!parent;
+  const panels = [panelEvidence, panelSamples, panelDecide, panelCheck, panelVerdict];
+  $("#stage").innerHTML = `
+    <div class="card claim-card">
+      <div class="claim-meta"><span class="tag">${esc(c.domain)}</span><span class="tag">${esc((D.models.find(m => m.key === c.model) || {}).label)}</span><span class="muted small">case ${esc(c.case_id)}</span></div>
+      <p class="claim-text">${esc(c.claim)}</p>
+      <div class="claim-foot">${pair ? `<div class="evtoggle"><span class="eyebrow" style="margin-right:8px">Evidence</span><div class="seg"><button class="${removed ? "" : "on"}" data-ev="0">Intact</button><button class="${removed ? "on removed" : ""}" data-ev="1">Deleted ✂️</button></div></div>` : ""}</div>
+    </div>
+    <div class="card controls">
+      <div class="stepper">${STEPS.map((s, i) => `<button class="s ${i <= st.step ? "done" : ""} ${i === 3 && !hasCheck(c) ? "skip" : ""}" data-s="${i}"><div class="bar"></div><span>${i + 1} · ${s}</span></button>`).join("")}</div>
+      <div class="btns"><button class="linkbtn" id="prevBtn" title="Previous step (←)">←</button><button class="linkbtn" id="playBtn" title="Play all steps (P)">${st.playing ? "❚❚ Pause" : "▶ Play"}</button><button class="linkbtn primary" id="nextBtn" title="Next step (→)">Next →</button></div>
+    </div>
+    <div id="panels">${panels.slice(0, st.step + 1).map(p => p(c)).join("")}</div>
+    <div class="hint"><span><kbd>→</kbd>/<kbd>Space</kbd> next step</span><span><kbd>←</kbd> back</span><span><kbd>P</kbd> play</span><span><kbd>R</kbd> reveal truth</span>${pair ? "<span><kbd>E</kbd> toggle evidence</span>" : ""}<span><kbd>↓</kbd>/<kbd>↑</kbd> next / previous case</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> model</span></div>`;
+  $("#stage").querySelectorAll("[data-ev]").forEach(b => b.onclick = () => { if ((b.dataset.ev === "1") !== removed) toggleEvidence(); });
+  $("#stage").querySelectorAll(".stepper .s").forEach(b => b.onclick = () => goStep(+b.dataset.s));
+  $("#stage").querySelectorAll(".ev").forEach(e => e.onclick = () => e.classList.toggle("open"));
+  $("#prevBtn").onclick = () => goStep(st.step - 1);
+  $("#nextBtn").onclick = () => nextStep();
+  $("#playBtn").onclick = () => st.playing ? stopPlay() : play();
+  const rb = $("#revealBtn"); if (rb) rb.onclick = reveal;
+}
+function goStep(i, scroll = true) {
+  st.step = Math.max(0, Math.min(4, i)); renderStage();
+  if (scroll) { const ps = document.querySelectorAll("#panels .panel"); const last = ps[ps.length - 1]; if (last && st.step > 0) last.scrollIntoView({ behavior: "smooth", block: "start" }); }
+}
+function nextStep() { if (st.step < 4) goStep(st.step + 1); else if (!st.revealed) reveal(); else moveCase(1); }
+function reveal() { st.revealed = true; renderStage(); const r = $(".reveal"); if (r) r.scrollIntoView({ behavior: "smooth", block: "center" }); }
+function play() {
+  stopPlay(); if (st.step >= 4) goStep(0);
+  st.playing = setInterval(() => { if (st.step >= 4) { stopPlay(); renderStage(); return; } goStep(st.step + 1); }, 2200); renderStage();
+}
+function stopPlay() { if (st.playing) { clearInterval(st.playing); st.playing = null; } }
+function moveCase(d) {
+  const ids = storyCases(); if (!ids.length) return;
+  const c = cur(); const base = c && c.parent_id ? `${c.model}:${c.parent_id}` : st.caseId;
+  const i = ids.indexOf(base); openCase(ids[(i + d + ids.length) % ids.length]);
+}
+
+/* ---------------- results ---------------- */
+const METRICS = [
+  { k: "wrong", name: "Wrong answers", better: "lower is better", raw: s => s.wrong_raw, ag: s => s.wrong_agent, tip: "share of all claims answered with a wrong verdict" },
+  { k: "ece", name: "Confidence error (ECE)", better: "lower is better", raw: s => s.ece_raw, ag: s => s.ece_agent, tip: "mean gap between stated confidence and accuracy" },
+  { k: "sel", name: "Accuracy when it answers", better: "higher is better", raw: s => s.sel_acc_raw, ag: s => s.sel_acc_agent, tip: "accuracy among delivered verdicts" },
+  { k: "cov", name: "Claims answered", better: "the price of caution", raw: s => 1, ag: s => s.coverage, tip: "share of claims that got a verdict rather than “I don’t know”" },
+];
+function domainSeg() {
+  const doms = Object.keys(DOMAIN_SHORT).filter(d => D.models.some(m => m.summary[d]));
+  $("#domainSeg").innerHTML = doms.map(d => `<button data-d="${d}" class="${d === st.domain ? "on" : ""}">${DOMAIN_SHORT[d]}</button>`).join("");
+  $("#domainSeg").querySelectorAll("button").forEach(b => b.onclick = () => { st.domain = b.dataset.d; results(); });
+}
+function results() {
+  domainSeg();
+  const rows = D.models.map(m => ({ m, s: m.summary[st.domain] })).filter(r => r.s);
+  const best = rows.slice().sort((a, b) => (b.s.wrong_raw - b.s.wrong_agent) - (a.s.wrong_raw - a.s.wrong_agent))[0];
+  const domName = { test_id: "biomedical claims (SciFact, in-domain)", test_ood: "COVID-19 health claims (HealthVer, a new domain)", test_climate: "climate claims (Climate-FEVER, a new domain)", test_vitc: "Wikipedia facts (VitaminC, a new domain)" }[st.domain];
+  if (best) $("#heroFig").innerHTML = `<div><div class="eyebrow">Wrong answers · ${esc(best.m.label)}</div><div class="num-big"><span class="from">${pct(best.s.wrong_raw)}</span><span class="arrow">→</span>${pct(best.s.wrong_agent)}</div></div>
+    <p>On ${best.s.n} held-out ${esc(domName)}, the same frozen model makes ${pct(1 - best.s.wrong_agent / best.s.wrong_raw)} fewer wrong calls inside Know-When-To-Check. It declines when it should and reports a credence that is ${(best.s.ece_raw * 100).toFixed(0)} → ${(best.s.ece_agent * 100).toFixed(0)} points off.</p>`;
+  const max = { wrong: Math.max(...rows.map(r => Math.max(r.s.wrong_raw, r.s.wrong_agent))), ece: Math.max(...rows.map(r => Math.max(r.s.ece_raw, r.s.ece_agent))), sel: 1, cov: 1 };
+  $("#modelCards").innerHTML = rows.map(({ m, s }) => `<div class="card mcard"><h3>${esc(m.label)}</h3>
+    <div class="sz">${(m.params_total / 1e9).toFixed(1)}B parameters${m.params_active < m.params_total ? ` · ${(m.params_active / 1e9).toFixed(0)}B active` : ""} · ${s.n} cases</div>
+    ${METRICS.map(M => { const r = M.raw(s), a = M.ag(s), mx = max[M.k] || 1;
+      const b = (cls, v, color, who) => `<div class="pbar ${cls}"><div class="tr"><div class="f" style="width:${Math.max(.5, v / mx * 100)}%;background:${color}"></div></div><span class="v">${pct(v)}</span><span class="tip">${who}: ${pct(v, 1)} · ${esc(M.tip)}</span></div>`;
+      return `<div class="metric"><div class="mh"><span>${M.name}</span><span class="better">${M.better}</span></div><div class="pair">${b("", r, "var(--neutral)", "Raw model")}${b("agent", a, "var(--answer)", "With our agent")}</div></div>`; }).join("")}
+    <div class="metric"><div class="mh"><span>Made-up sources</span><span class="better">${pct(s.fab_raw, 1)} → <b style="color:var(--ink)">${pct(s.fab_agent, 1)}</b></span></div></div></div>`).join("");
+  $("#resTable").innerHTML = `<table class="data"><tr><th>Model</th><th>Wrong (raw)</th><th>Wrong (agent)</th><th>ECE (raw)</th><th>ECE (agent)</th><th>Acc. when answering (raw)</th><th>(agent)</th><th>Answered</th><th>Checked</th></tr>
+    ${rows.map(({ m, s }) => `<tr><td>${esc(m.label)}</td><td>${pct(s.wrong_raw, 1)}</td><td>${pct(s.wrong_agent, 1)}</td><td>${pct(s.ece_raw, 1)}</td><td>${pct(s.ece_agent, 1)}</td><td>${pct(s.sel_acc_raw, 1)}</td><td>${pct(s.sel_acc_agent, 1)}</td><td>${pct(s.coverage, 1)}</td><td>${pct(s.check_rate, 1)}</td></tr>`).join("")}</table>`;
+  const vb = rows.map(r => `${MODEL_SHORT[r.m.key]}: fixed ${pct(r.s.verify_fixed)}, broke ${pct(r.s.verify_broke)}`).join(" · ");
+  $("#findings").innerHTML = [
+    { h: "Unchecked checking makes models worse", p: `Letting the model look things up with no rules broke more right answers than it fixed (${vb}). The three rules turn checking into evidence the agent can weigh.` },
+    { h: "Models judge by topic, not evidence", p: "Delete only the decisive sentence and all three models keep answering, at the same confidence. The blind judge catches most of these." },
+    { h: "Confidence doesn’t travel; a little data fixes it", p: "In a new domain the model’s self-confidence carries no signal, but evidence-based signals transfer. About 100 labelled examples bring calibration back, and the agent can refuse domains it can’t serve safely." },
+  ].map((f, i) => `<div class="card finding"><div class="n">0${i + 1}</div><h4>${esc(f.h)}</h4><p>${esc(f.p)}</p></div>`).join("");
+}
+
+/* ---------------- keyboard ---------------- */
+document.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || /input|textarea|select/i.test(e.target.tagName)) return;
+  if (["1", "2", "3"].includes(e.key) && D.models[+e.key - 1]) { show("walk"); setModel(D.models[+e.key - 1].key); return; }
+  if (st.view !== "walk") { if (e.key === "ArrowRight" && st.view === "overview") { show("walk"); e.preventDefault(); } return; }
+  const k = e.key;
+  if (k === "ArrowRight" || k === " ") { e.preventDefault(); stopPlay(); nextStep(); }
+  else if (k === "ArrowLeft") { e.preventDefault(); stopPlay(); goStep(st.step - 1); }
+  else if (k === "ArrowDown") { e.preventDefault(); moveCase(1); }
+  else if (k === "ArrowUp") { e.preventDefault(); moveCase(-1); }
+  else if (k === "r" || k === "R") reveal();
+  else if (k === "e" || k === "E") toggleEvidence();
+  else if (k === "p" || k === "P") st.playing ? (stopPlay(), renderStage()) : play();
 });
-loadClaims();
+
+/* ---------------- boot ---------------- */
+if (!D) { document.body.innerHTML = "<p style='padding:40px'>replay.js not found. Run <code>python -m demo.build_replay</code>.</p>"; }
+else {
+  st.view = "overview"; overview(); modelSeg(); setModel(st.model); results();
+  // deep links for rehearsed demos: #results&domain=test_ood  or  #walk&case=llama8b:sf-dev-0013&step=4&reveal
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.has("domain")) { st.domain = h.get("domain"); results(); }
+  const c = h.get("case");
+  if (c && D.cases[c]) { st.model = D.cases[c].model; modelSeg(); openCase(c); }
+  else if (h.get("model")) setModel(h.get("model"));
+  if (h.has("step")) goStep(+h.get("step"), false);
+  if (h.has("reveal")) { st.revealed = true; renderStage(); }
+  if (h.has("dark")) document.documentElement.dataset.theme = "dark";
+  for (const v of ["overview", "walk", "results"]) if (h.has(v)) show(v);
+}
 </script>
 </body>
 </html>

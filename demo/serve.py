@@ -8,13 +8,15 @@ import argparse
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 from common import config as C
 from common.io import read_jsonl
 
-INDEX = Path(__file__).parent / "index.html"
+INDEX = Path(__file__).parent / "index.html"        # presentation demo: replays real runs (demo/replay.js)
+LIVE = Path(__file__).parent / "live.html"          # live agent on one claim (needs the LLM backend)
+REPLAY = Path(__file__).parent / "replay.js"        # python -m demo.build_replay
 
 
 class InferRequest(BaseModel):
@@ -60,6 +62,16 @@ def create_app(controller: str | Path = C.ART_DIR / "controller.npz", calibrator
     @app.get("/", response_class=HTMLResponse)
     def index():
         return INDEX.read_text(encoding="utf-8")
+
+    @app.get("/live", response_class=HTMLResponse)
+    def live():
+        return LIVE.read_text(encoding="utf-8")
+
+    @app.get("/replay.js")
+    def replay():
+        if not REPLAY.exists():
+            raise HTTPException(404, "replay data not built; run python -m demo.build_replay")
+        return Response(REPLAY.read_text(encoding="utf-8"), media_type="application/javascript")
 
     @app.get("/report", response_class=HTMLResponse)
     def report_page():

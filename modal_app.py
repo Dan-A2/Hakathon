@@ -32,6 +32,8 @@ image = (
     .add_local_python_source("common", "data", "agent", "controller", "scorer", "eval", "demo", "modal_app")
     .add_local_dir("agent/prompts", remote_path="/root/agent/prompts", ignore=lambda p: p.suffix == ".py")
     .add_local_file("demo/index.html", remote_path="/root/demo/index.html")
+    .add_local_file("demo/live.html", remote_path="/root/demo/live.html")
+    .add_local_file("demo/replay.js", remote_path="/root/demo/replay.js")
 )
 
 _CASES: dict[tuple[str, str], dict[str, dict]] = {}   # per-container cache of (cases_name, split) -> case_id -> case
