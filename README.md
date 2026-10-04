@@ -8,8 +8,6 @@ their evidence.
 Pitch line: *an agent that learns when its own answer is worth checking, and a test bench
 that proves it is not gaming the reward.*
 
-**▶ Video explanation:** https://www.loom.com/share/71e798df14b74ed9a6d4e24f5f4ff662
-
 **Presentation demo:** `python -m demo.serve --port 8000` and open http://127.0.0.1:8000, or simply open
 `demo/index.html` in a browser (works offline). It replays real, cached runs of all three frozen models step by
 step (evidence, two samples, the answer / check / decline decision, the check with the three rules, the verdict, and
