@@ -9,6 +9,8 @@
 #         scripts/run_modal.sh all      # everything: caches, training, sweep, evaluation, figures, demo deploy
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Credentials can live in a gitignored .env (MODAL_TOKEN_ID / MODAL_TOKEN_SECRET, optionally HF_TOKEN)
+[ -f .env ] && { set -a; . ./.env; set +a; }
 PY=${PY:-.venv/bin/python}
 MODAL=${MODAL:-.venv/bin/modal}
 MODE=${1:-all}

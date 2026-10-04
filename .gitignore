@@ -7,3 +7,4 @@ data/raw/
 data/cases/
 data/cases_shortcut/
 .DS_Store
+.env
