@@ -8,8 +8,10 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from agent.epistemic import disciplined_provisional, disciplined_verified, post_check_features
 from common import config as C
 from common.io import read_jsonl
+from data.records import StoreRegistry
 
 COMMIT = set(C.COMMIT_LABELS)
 
@@ -47,6 +49,30 @@ class Scored:
     gold_sentences: dict = field(default_factory=dict)
     flags: dict = field(default_factory=dict)
     raw: dict = field(default_factory=dict, repr=False)
+    # epistemic (disciplined) outcomes - see agent/epistemic.py
+    dprov_verdict: str = ""
+    dprov_correct: bool = False
+    dprov_cited: list = field(default_factory=list)
+    dver_verdict: str = ""
+    dver_correct: bool = False
+    dver_cited: list = field(default_factory=list)
+    dver_source: str = ""
+    z: dict = field(default_factory=dict)
+    judge: dict | None = None
+
+    @property
+    def contested(self) -> bool:
+        """The check disagreed with the prior: the claim is contested for this agent."""
+        return self.dver_verdict != self.dprov_verdict
+
+    @property
+    def dver_rationale_hit(self) -> bool:
+        return any(str(c["doc_id"]) in self.gold_sentences and int(c["sentence"]) in self.gold_sentences[str(c["doc_id"])]
+                   for c in self.dver_cited)
+
+    @property
+    def dver_doc_hit(self) -> bool:
+        return any(str(c["doc_id"]) in self.gold_doc_ids for c in self.dver_cited)
 
     # ---- integrity helpers -------------------------------------------------------------
     @property
@@ -83,13 +109,44 @@ def load_gold(cases_dir: Path | str, split: str) -> dict[str, dict]:
     return {r["case_id"]: r for r in rows}
 
 
-def score_records(records: list[dict], gold: dict[str, dict]) -> list[Scored]:
+class ScoreContext:
+    """Record stores and claim texts, needed to apply the epistemic discipline rules."""
+
+    def __init__(self, cases_dir: Path | str, judge: dict[str, dict] | None = None):
+        self.registry = StoreRegistry(cases_dir)
+        self.cases: dict[str, dict] = {}
+        for split in C.SPLITS:
+            for c in read_jsonl(Path(cases_dir) / f"{split}.jsonl"):
+                self.cases[c["case_id"]] = c
+        self.judge = judge or {}
+
+
+def score_records(records: list[dict], gold: dict[str, dict], ctx: ScoreContext | None = None) -> list[Scored]:
     out = []
     for r in records:
         g = gold.get(r["case_id"])
         if g is None:
             continue
         a, b, ver, prov = r["a"], r["b"], r["ver"], r["prov"]
+        shown = {str(d) for d in r.get("shown_doc_ids", [])}
+        opened = {str(d) for d in ver.get("opened_doc_ids", [])}
+        dprov = disciplined_provisional(prov, shown)
+        if ctx is not None and r["case_id"] in ctx.cases:
+            case = ctx.cases[r["case_id"]]
+            store, exclude = ctx.registry.for_case(case)
+            judge = ctx.judge.get(r["case_id"])
+            dver = disciplined_verified(ver, shown, opened, store, exclude, judge)
+            z = post_check_features(r["x"], dprov, ver, dver, judge, case["question"], int(r.get("K", C.DEFAULT_K)))
+        else:   # no stores available (unit tests): grounding by id only, no judge
+            judge = None
+            acc = shown | opened
+            cites = [c for c in ver.get("cited", []) if str(c.get("doc_id")) in acc and c.get("sentence") is not None]
+            if ver["verdict"] in COMMIT and not cites:
+                dver = {"verdict": "insufficient_evidence", "confidence": ver["confidence"], "cited": [], "grounded": False, "source": "ungrounded"}
+            else:
+                dver = {"verdict": ver["verdict"] if ver["verdict"] in COMMIT else "insufficient_evidence", "confidence": ver["confidence"],
+                        "cited": cites, "grounded": True, "source": "verifier"}
+            z = {}
         out.append(Scored(
             case_id=r["case_id"], group_id=r["group_id"], variant=r.get("variant", "base"),
             parent_id=r.get("parent_id"), label=g["label"], x=r["x"],
@@ -108,24 +165,53 @@ def score_records(records: list[dict], gold: dict[str, dict]) -> list[Scored]:
             gold_doc_ids={str(d) for d in g.get("gold_doc_ids", [])},
             gold_sentences={str(k): set(int(i) for i in v) for k, v in g.get("gold_sentences", {}).items()},
             flags=r.get("flags", {}), raw=r,
+            dprov_verdict=dprov["verdict"], dprov_correct=dprov["verdict"] == g["label"], dprov_cited=list(dprov["cited_doc_ids"]),
+            dver_verdict=dver["verdict"], dver_correct=dver["verdict"] == g["label"], dver_cited=list(dver["cited"]),
+            dver_source=dver["source"], z=z, judge=judge,
         ))
     return out
+
+
+def load_judge(cache_dir: Path | str, split: str) -> dict[str, dict]:
+    """Blind-judge records for a split (optional; produced by agent/build_judge.py or modal_app.py::judge)."""
+    path = Path(cache_dir) / f"judge_{split}.jsonl"
+    return {r["case_id"]: r for r in read_jsonl(path)} if path.exists() else {}
 
 
 def load_scored(split: str, cases_dir: Path | str = C.CASES_DIR, cache_dir: Path | str = C.CACHE_DIR) -> list[Scored]:
     records = read_jsonl(Path(cache_dir) / f"{split}.jsonl")
     if not records:
         raise FileNotFoundError(f"no cache for split {split!r} in {cache_dir}; run agent.build_cache first")
-    return score_records(records, load_gold(cases_dir, split))
+    ctx = ScoreContext(cases_dir, load_judge(cache_dir, split))
+    return score_records(records, load_gold(cases_dir, split), ctx)
 
 
 # ----------------------------------------------------------------------------- rewards
 def reward(sc: Scored, action: int, w: float = C.DEFAULT_W, c: float = C.DEFAULT_C) -> float:
+    cost = c * sc.ver_tool_calls
     if action == C.ANSWER:
         return 1.0 if sc.prov_correct else -w
     if action == C.VERIFY:
-        return (1.0 if sc.ver_correct else -w) - c * sc.ver_tool_calls
+        return (1.0 if sc.ver_correct else -w) - cost
+    if action == C.D_ANSWER:
+        return 1.0 if sc.dprov_correct else -w
+    if action == C.CHECK_COMMIT:
+        return (1.0 if sc.dver_correct else -w) - cost
+    if action == C.CHECK_KEEP:
+        return (1.0 if sc.dprov_correct else -w) - cost
+    if action == C.CHECK_ABSTAIN:
+        return -cost                                   # checked, learned the claim is contested, said nothing
     return 0.0
+
+
+def post_check_oracle(sc: Scored, w: float = C.DEFAULT_W, c: float = C.DEFAULT_C) -> int:
+    """Best post-check decision with gold (upper bound for the second stage)."""
+    rs = {a: reward(sc, a, w, c) for a in C.STAGE2_DECISIONS}
+    best = max(rs.values())
+    for a in (C.CHECK_KEEP, C.CHECK_COMMIT, C.CHECK_ABSTAIN):
+        if rs[a] == best:
+            return a
+    return C.CHECK_ABSTAIN
 
 
 def oracle_action(sc: Scored, w: float = C.DEFAULT_W, c: float = C.DEFAULT_C) -> int:
@@ -151,6 +237,28 @@ def outcome(sc: Scored, action: int) -> dict:
                 "committed": True, "tool_calls": sc.ver_tool_calls, "llm_calls": sc.prov_llm_calls + sc.ver_llm_calls,
                 "tokens": sc.prov_tokens + sc.ver_tokens, "gpu_s": sc.prov_latency + sc.ver_latency,
                 "fabricated": sc.ver_fabricated, "rationale_hit": sc.ver_rationale_hit, "doc_hit": sc.ver_doc_hit}
+    if action == C.D_ANSWER:
+        committed = sc.dprov_verdict in COMMIT or sc.dprov_verdict == "insufficient_evidence"
+        return {"verdict": sc.dprov_verdict, "confidence": sc.prov_conf,
+                "cited": [{"doc_id": d, "sentence": None} for d in sc.dprov_cited], "correct": sc.dprov_correct,
+                "committed": committed, "tool_calls": 0, "llm_calls": sc.prov_llm_calls, "tokens": sc.prov_tokens,
+                "gpu_s": sc.prov_latency, "fabricated": False, "rationale_hit": any(str(d) in sc.gold_doc_ids for d in sc.dprov_cited),
+                "doc_hit": any(str(d) in sc.gold_doc_ids for d in sc.dprov_cited)}
+    checked = {"tool_calls": sc.ver_tool_calls, "llm_calls": sc.prov_llm_calls + sc.ver_llm_calls + (1 if sc.judge else 0),
+               "tokens": sc.prov_tokens + sc.ver_tokens + int((sc.judge or {}).get("tokens", 0)),
+               "gpu_s": sc.prov_latency + sc.ver_latency + float((sc.judge or {}).get("latency_s", 0.0))}
+    if action == C.CHECK_COMMIT:
+        return {"verdict": sc.dver_verdict, "confidence": sc.raw["ver"]["confidence"],
+                "cited": [{"doc_id": c["doc_id"], "sentence": c["sentence"]} for c in sc.dver_cited], "correct": sc.dver_correct,
+                "committed": True, **checked, "fabricated": False, "rationale_hit": sc.dver_rationale_hit, "doc_hit": sc.dver_doc_hit}
+    if action == C.CHECK_KEEP:
+        return {"verdict": sc.dprov_verdict, "confidence": sc.prov_conf,
+                "cited": [{"doc_id": d, "sentence": None} for d in sc.dprov_cited], "correct": sc.dprov_correct,
+                "committed": True, **checked, "fabricated": False, "rationale_hit": any(str(d) in sc.gold_doc_ids for d in sc.dprov_cited),
+                "doc_hit": any(str(d) in sc.gold_doc_ids for d in sc.dprov_cited)}
+    if action == C.CHECK_ABSTAIN:
+        return {"verdict": "abstain", "confidence": None, "cited": [], "correct": False, "committed": False, **checked,
+                "fabricated": False, "rationale_hit": False, "doc_hit": False}
     return {"verdict": "abstain", "confidence": None, "cited": [], "correct": False, "committed": False,
             "tool_calls": 0, "llm_calls": sc.prov_llm_calls, "tokens": sc.prov_tokens, "gpu_s": sc.prov_latency,
             "fabricated": False, "rationale_hit": False, "doc_hit": False}
@@ -186,10 +294,11 @@ def integrity_report(scored: list[Scored], actions: dict[str, int]) -> dict:
             if to["committed"] and to["verdict"] == po["verdict"] and (to["confidence"] or 0) >= 0.7:
                 stub_num += 1
 
-    verified = [sc for sc in scored if actions[sc.case_id] == C.VERIFY]
-    w2r = sum(1 for sc in verified if (not sc.prov_correct) and sc.ver_correct)
-    r2w = sum(1 for sc in verified if sc.prov_correct and (not sc.ver_correct))
-    abstained = [sc for sc in scored if actions[sc.case_id] == C.ABSTAIN]
+    verified = [sc for sc in scored if actions[sc.case_id] in C.CHECKED]
+    w2r = sum(1 for sc in verified if (not sc.prov_correct) and outs[sc.case_id]["correct"])
+    r2w = sum(1 for sc in verified if sc.prov_correct and (not outs[sc.case_id]["correct"]))
+    abstained = [sc for sc in scored if not outs[sc.case_id]["committed"]]
+    contested = [sc for sc in verified if sc.contested]
     unnecessary = sum(1 for sc in abstained if sc.prov_correct or sc.ver_correct)
     harmful = sum(1 for cid in committed if not outs[cid]["correct"])
     return {
@@ -203,6 +312,8 @@ def integrity_report(scored: list[Scored], actions: dict[str, int]) -> dict:
         "verify_right_to_wrong": r2w,
         "n_verified": len(verified),
         "unnecessary_abstention_rate": _rate(unnecessary, n),
+        "check_rate": _rate(len(verified), n),
+        "contested_rate_among_checked": _rate(len(contested), len(verified)),
         "unnecessary_abstention_among_abstained": _rate(unnecessary, len(abstained)),
         "harmful_answer_rate": _rate(harmful, n),
         "n_committed": len(committed), "n_twins": len(twins), "n_flip_den": flip_den, "n_stubborn_den": stub_den,
@@ -229,3 +340,7 @@ def annotate(sc: Scored, action: int, w: float, c: float) -> dict:
     return {"gold": sc.label, "correct": o["correct"], "reward": reward(sc, action, w, c),
             "integrity": {"fabricated": o["fabricated"], "rationale_hit": o["rationale_hit"]},
             "case_type": case_type(sc), "oracle_action": C.ACTIONS[oracle_action(sc, w, c)]}
+
+
+def decision_name(action: int) -> str:
+    return C.DECISIONS[action]

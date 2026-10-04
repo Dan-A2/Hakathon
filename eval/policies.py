@@ -9,10 +9,14 @@ from common import config as C
 from controller.policy import Controller
 from scorer.score import Scored, oracle_action, outcome, reward
 
-POLICY_ORDER = ["always_answer", "always_verify", "always_abstain", "heuristic", "ours", "oracle", "shortcut"]
+POLICY_ORDER = ["always_answer", "always_verify", "always_abstain", "heuristic", "ours", "always_check",
+                "epistemic_rl", "epistemic_eu", "oracle", "shortcut"]
 POLICY_LABELS = {"always_answer": "Always answer (original agent)", "always_verify": "Always verify",
                  "always_abstain": "Always abstain", "heuristic": "Tuned heuristic", "ours": "Ours (trained W)",
+                 "always_check": "Always check (disciplined verifier)", "epistemic_rl": "Epistemic agent (two-stage RL)",
+                 "epistemic_eu": "Epistemic agent (credence-based)",
                  "oracle": "Oracle (upper bound)", "shortcut": "Shortcut-trained controller"}
+EPISTEMIC = {"epistemic_rl", "epistemic_eu"}
 
 
 class Decision(dict):
@@ -62,8 +66,24 @@ def decide_oracle(scored: list[Scored], w: float, c: float) -> dict[str, Decisio
     return {sc.case_id: Decision(action=oracle_action(sc, w, c), action_probs=None) for sc in scored}
 
 
+def decide_two_stage(scored: list[Scored], ctrl) -> dict[str, Decision]:
+    out = {}
+    for sc in scored:
+        d, info = ctrl.decide(sc.x, sc.z)
+        out[sc.case_id] = Decision(action=d, action_probs=[info["stage1"][n] for n in C.STAGE1_NAMES], stage2=info.get("stage2"))
+    return out
+
+
+def decide_eu(scored: list[Scored], ctrl) -> dict[str, Decision]:
+    out = {}
+    for sc in scored:
+        d, cred, info = ctrl.decide(sc.x, sc.z)
+        out[sc.case_id] = Decision(action=d, action_probs=None, credence=cred, ev=info)
+    return out
+
+
 def build_policies(scored: list[Scored], val: list[Scored], ctrl: Controller, w: float, c: float,
-                   shortcut_ctrl: Controller | None = None) -> tuple[dict[str, dict[str, Decision]], dict]:
+                   shortcut_ctrl: Controller | None = None, epi_rl=None, epi_eu=None) -> tuple[dict[str, dict[str, Decision]], dict]:
     tau_a, tau_v, val_r = tune_heuristic(val, w, c)
     pols = {
         "always_answer": decide_constant(scored, C.ANSWER),
@@ -71,8 +91,13 @@ def build_policies(scored: list[Scored], val: list[Scored], ctrl: Controller, w:
         "always_abstain": decide_constant(scored, C.ABSTAIN),
         "heuristic": decide_heuristic(scored, tau_a, tau_v),
         "ours": decide_controller(scored, ctrl),
+        "always_check": decide_constant(scored, C.CHECK_COMMIT),
         "oracle": decide_oracle(scored, w, c),
     }
+    if epi_rl is not None:
+        pols["epistemic_rl"] = decide_two_stage(scored, epi_rl)
+    if epi_eu is not None:
+        pols["epistemic_eu"] = decide_eu(scored, epi_eu)
     if shortcut_ctrl is not None:
         pols["shortcut"] = decide_controller(scored, shortcut_ctrl)
     return pols, {"tau_a": tau_a, "tau_v": tau_v, "val_reward": val_r}
@@ -86,7 +111,9 @@ def per_case_rows(scored: list[Scored], decisions: dict[str, Decision], w: float
         o = outcome(sc, d["action"])
         rows.append({
             "case_id": sc.case_id, "group_id": sc.group_id, "variant": sc.variant, "parent_id": sc.parent_id,
-            "action": d["action"], "action_probs": d.get("action_probs"), "verdict": o["verdict"],
+            "action": d["action"], "action_name": C.DECISIONS[d["action"]], "action_coarse": C.COARSE[d["action"]],
+            "checked": d["action"] in C.CHECKED, "contested": sc.contested if d["action"] in C.CHECKED else None,
+            "credence": d.get("credence"), "action_probs": d.get("action_probs"), "verdict": o["verdict"],
             "confidence": o["confidence"], "cited": o["cited"], "committed": o["committed"], "correct": o["correct"],
             "reward": reward(sc, d["action"], w, c), "tool_calls": o["tool_calls"], "llm_calls": o["llm_calls"],
             "tokens": o["tokens"], "gpu_s": o["gpu_s"], "fabricated": o["fabricated"], "rationale_hit": o["rationale_hit"],

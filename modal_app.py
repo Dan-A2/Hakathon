@@ -77,6 +77,41 @@ def build_case(case_id: str, split: str, K: int = 4, cases_name: str = "cases", 
     return rec
 
 
+@app.function(image=image, volumes={ART: vol}, secrets=[llm_secret], timeout=600, retries=2, max_containers=64)
+def judge_case(case_id: str, split: str, cache_name: str = "cache", cases_name: str = "cases", llm_spec: dict | None = None) -> dict:
+    """Blind judge for one cached case: an evidence-only LLM call on the sentences the verifier cited."""
+    from agent.build_judge import judge_record, needs_judge
+    from common.io import load_json, save_json
+    from data.records import StoreRegistry
+
+    out = Path(f"{ART}/{cache_name}/judge/{split}/{case_id}.json")
+    if out.exists():
+        return load_json(out)
+    rec = load_json(Path(f"{ART}/{cache_name}/{split}/{case_id}.json"))
+    case = _cases(split, cases_name)[case_id]
+    registry = StoreRegistry(f"{ART}/data/{cases_name}")
+    quotes = needs_judge(rec, registry, case)
+    if not quotes:
+        return {"case_id": case_id, "skipped": True}
+    try:
+        row = judge_record(rec, case, quotes, _make_llm(llm_spec))
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"{case_id}: {type(e).__name__}: {e}"[:600]) from None
+    save_json(out, row, indent=None)
+    vol.commit()
+    return row
+
+
+@app.function(image=image, volumes={ART: vol}, timeout=1800)
+def merge_judge(split: str, cache_name: str = "cache") -> str:
+    from agent.build_judge import merge_judge as _merge
+
+    vol.reload()
+    out = _merge(Path(f"{ART}/{cache_name}"), split)
+    vol.commit()
+    return str(out)
+
+
 @app.function(image=image, secrets=[llm_secret], timeout=900)
 def check_llm(llm_spec: dict | None = None) -> dict:
     """Preflight: which backend/URL is selected (secret or --model), and one real JSON call through agent.llm."""
@@ -258,6 +293,42 @@ def cache(split: str = "train", model: str = "", shortcut: bool = False, k: int 
     remote = merge.remote(split, cache_name)
     local = _download(f"{cache_name}/{split}.jsonl", Path(out_dir) / f"{split}.jsonl")
     print(f"{split}: {n_ok} ok, {n_err} errors; merged {remote}; downloaded to {local}")
+
+
+@app.local_entrypoint()
+def judge(split: str = "train", model: str = "", limit: int = 0, cases_dir: str = "data/cases", out_dir: str = ""):
+    """Blind-judge every committed, grounded verified verdict of a cached split (one short call each)."""
+    from agent.build_judge import needs_judge
+    from common.io import read_jsonl
+    from data.records import StoreRegistry
+
+    if model:
+        from common.models import get
+
+        out_dir = out_dir or f"art/{get(model)['cache']}"
+    out_dir = out_dir or "art/cache"
+    cache_name, cases_name = Path(out_dir).name, Path(cases_dir).name
+    registry = StoreRegistry(cases_dir)
+    cases = {c["case_id"]: c for c in read_jsonl(f"{cases_dir}/{split}.jsonl")}
+    recs = read_jsonl(f"{out_dir}/{split}.jsonl")
+    ids = [r["case_id"] for r in recs if r["case_id"] in cases and needs_judge(r, registry, cases[r["case_id"]])]
+    if limit:
+        ids = ids[:limit]
+    print(f"{split}: {len(ids)} of {len(recs)} cached cases have a committed, grounded verified verdict to judge")
+    _preflight(model)
+    n_ok = n_err = 0
+    for res in judge_case.map(ids, kwargs={"split": split, "cache_name": cache_name, "cases_name": cases_name, "llm_spec": _llm_spec(model)},
+                              return_exceptions=True, order_outputs=False):
+        if isinstance(res, Exception):
+            n_err += 1
+            print(f"  error: {str(res).strip().splitlines()[-1][:300]}")
+            if n_ok == 0 and n_err >= 5:
+                raise SystemExit("first 5 judge calls failed; stopping.")
+        else:
+            n_ok += 1
+    remote = merge_judge.remote(split, cache_name)
+    local = _download(f"{cache_name}/judge_{split}.jsonl", Path(out_dir) / f"judge_{split}.jsonl")
+    print(f"{split}: {n_ok} judged, {n_err} errors; merged {remote}; downloaded to {local}")
 
 
 @app.local_entrypoint()

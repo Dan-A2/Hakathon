@@ -3,7 +3,9 @@
 #
 #   scripts/run_models.sh deploy                 # register all vLLM servers (GPUs start only on demand)
 #   scripts/run_models.sh llama8b gate           # preflight + 20 cases + health report
-#   scripts/run_models.sh llama8b all            # caches, training, sweep, evaluation for that model
+#   scripts/run_models.sh llama8b all            # caches, blind judge, training, sweep, evaluation for that model
+#   scripts/run_models.sh llama8b judge          # only the blind-judge pass + retrain + re-evaluate (cache exists)
+#   KWTC_JUDGE=0 scripts/run_models.sh llama8b all   # skip the judge
 #   scripts/run_models.sh compare                # cross-model tables and figures (art/models/)
 #
 # Models: gemma26b, llama8b, llama3b (common/models.py).  Llama weights are gated: request access on
@@ -22,6 +24,15 @@ case "${1:-}" in
   *) echo "usage: $0 deploy | compare | <gemma26b|llama8b|llama3b> [gate|all]"; exit 2 ;;
 esac
 MODE=${2:-all}
+if [ "$MODE" = "judge" ]; then
+  CACHE=art/$($PY -c "from common.models import get; print(get('$MODEL')['cache'])")
+  OUT=art/models/$MODEL
+  for s in train val test_id test_ood; do $MODAL run modal_app.py::judge --model "$MODEL" --split "$s"; done
+  $PY -m controller.epistemic --w 1 --c 0.05 --seeds 5 --cache-dir "$CACHE" --out-dir "$OUT"
+  $PY -m eval.evaluate --split test_id  --controller "$OUT/controller.npz" --cache-dir "$CACHE" --out "$OUT" --logs "$OUT/logs" --figs "$OUT/figs" --sweep "$OUT/sweep.jsonl"
+  $PY -m eval.evaluate --split test_ood --controller "$OUT/controller.npz" --cache-dir "$CACHE" --out "$OUT" --logs "$OUT/logs" --figs "$OUT/figs_ood" --sweep "$OUT/sweep.jsonl" --shortcut-controller "$OUT/controller_shortcut.npz"
+  $PY -m eval.compare --split test_id; exit 0
+fi
 CACHE=art/$($PY -c "from common.models import get; print(get('$MODEL')['cache'])")
 CACHE_SC=art/$($PY -c "from common.models import get; print(get('$MODEL')['cache_shortcut'])")
 OUT=art/models/$MODEL
@@ -45,9 +56,15 @@ for s in train val test_id test_ood; do $MODAL run modal_app.py::cache --model "
 for s in train val; do $MODAL run modal_app.py::cache --model "$MODEL" --shortcut --split "$s"; done
 $PY -m agent.cache_report --split test_id --cache-dir "$CACHE"
 
-step "$MODEL: train controllers"
+if [ "${KWTC_JUDGE:-1}" = "1" ]; then
+  step "$MODEL: blind judge (evidence-only reading of every committed verified verdict)"
+  for s in train val test_id test_ood; do $MODAL run modal_app.py::judge --model "$MODEL" --split "$s"; done
+fi
+
+step "$MODEL: train controllers (3-action REINFORCE, two-stage epistemic RL, credence-based)"
 $PY -m controller.train --w 1 --c 0.05 --seeds 5 --cache-dir "$CACHE" --out "$OUT/controller.npz"
 $PY -m controller.train --w 1 --c 0.05 --seeds 5 --cases-dir data/cases_shortcut --cache-dir "$CACHE_SC" --out "$OUT/controller_shortcut.npz"
+$PY -m controller.epistemic --w 1 --c 0.05 --seeds 5 --cache-dir "$CACHE" --out-dir "$OUT"
 
 step "$MODEL: reward-design sweep on Modal"
 $MODAL run modal_app.py::sweep --model "$MODEL" --seeds 5 --out "$OUT/sweep.jsonl"

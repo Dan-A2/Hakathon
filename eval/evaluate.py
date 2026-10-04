@@ -22,7 +22,7 @@ from controller.calibrate import Calibrator, brier, ece, fit_calibrator, reliabi
 from controller.policy import Controller, feature_matrix
 from controller.train import Data, argmax_actions, run_sweep
 from eval import figures as F
-from eval.policies import POLICY_LABELS, POLICY_ORDER, build_policies, per_case_rows
+from eval.policies import EPISTEMIC, POLICY_LABELS, POLICY_ORDER, build_policies, per_case_rows
 from eval.stats import cluster_bootstrap, fmt_ci, mcnemar, paired_cluster_bootstrap
 from scorer.score import Scored, case_type, integrity_report, outcome, reward
 
@@ -52,7 +52,11 @@ def policy_metrics(scored: list[Scored], decisions, w: float, c: float, cal: Cal
         "gpu_s": cb([float(r["gpu_s"]) for r in rows]),
         "fabrication": cb([float(r["fabricated"]) for r in committed], gc),
         "integrity": integrity_report(scored, {cid: d["action"] for cid, d in decisions.items()}),
-        "action_mix": {a: float(np.mean([r["action"] == k for r in rows])) for k, a in enumerate(C.ACTIONS)},
+        "action_mix": {a: float(np.mean([r["action_coarse"] == a for r in rows])) for a in C.ACTIONS},
+        "decision_mix": {n: float(np.mean([r["action_name"] == n for r in rows])) for n in C.DECISIONS if any(r["action_name"] == n for r in rows)},
+        "check_rate": float(np.mean([r["checked"] for r in rows])),
+        "contested_rate_among_checked": float(np.mean([r["contested"] for r in rows if r["checked"]])) if any(r["checked"] for r in rows) else None,
+        "contested_then_abstained": int(sum(1 for r in rows if r["checked"] and r["contested"] and not r["committed"])),
     }
     # calibration on committed cases: raw verbalised confidence vs calibrated P(correct)
     if committed:
@@ -60,7 +64,10 @@ def policy_metrics(scored: list[Scored], decisions, w: float, c: float, cal: Cal
         raw = np.asarray([r["confidence"] for r in committed], dtype=float)
         calib = {"n": len(committed), "ece_raw": ece(raw, y), "brier_raw": brier(raw, y), "bins_raw": reliability_bins(raw, y)}
         if cal is not None:
-            p = cal.predict([r["x"] for r in committed], [r["action"] for r in committed])
+            # the agent's reported number: its own credence when it has one (credence-based agent), else the calibrator
+            coarse = [C.ANSWER if r["action_coarse"] == "answer" else C.VERIFY for r in committed]
+            p = cal.predict([r["x"] for r in committed], coarse)
+            p = np.array([r["credence"] if r.get("credence") is not None else pi for r, pi in zip(committed, p)])
             calib.update({"ece_cal": ece(p, y), "brier_cal": brier(p, y), "bins_cal": reliability_bins(p, y)})
             for r, pi in zip(committed, p):
                 r["p_correct"] = float(pi)
@@ -214,9 +221,15 @@ def case_cards(scored: list[Scored], rows_ours: list[dict], cases: dict[str, dic
 # ----------------------------------------------------------------------------- main
 def evaluate(split: str, controller_path: Path, cases_dir: Path, cache_dir: Path, figs_dir: Path | None, out_dir: Path,
              logs_dir: Path, sweep_path: Path | None, n_boot: int = 10000, seed: int = 0,
-             shortcut_controller: Path | None = None, w: float | None = None, c: float | None = None) -> dict:
+             shortcut_controller: Path | None = None, w: float | None = None, c: float | None = None,
+             epistemic_dir: Path | None = None) -> dict:
     t0 = time.time()
     ctrl = Controller.load(controller_path, check_prompt=not C_skip_hash())
+    from controller.epistemic import EUController, TwoStageController
+
+    epi_dir = Path(epistemic_dir) if epistemic_dir else Path(controller_path).parent
+    epi_rl = TwoStageController.load(epi_dir / "epistemic_rl.npz") if (epi_dir / "epistemic_rl.npz").exists() else None
+    epi_eu = EUController.load(epi_dir / "epistemic_eu.npz") if (epi_dir / "epistemic_eu.npz").exists() else None
     w = ctrl.w if w is None else w
     c = ctrl.c if c is None else c
     use_tok = C.TOK_PROB_FEATURE in ctrl.feature_names
@@ -227,7 +240,7 @@ def evaluate(split: str, controller_path: Path, cases_dir: Path, cache_dir: Path
 
     cal = fit_val_calibrator(val, ctrl)
     cal.save(out_dir / "calibrator.npz")
-    pols, heur = build_policies(scored, val, ctrl, w, c, shortcut)
+    pols, heur = build_policies(scored, val, ctrl, w, c, shortcut, epi_rl, epi_eu)
     policies = [p for p in POLICY_ORDER if p in pols]
 
     metrics, rows = {}, {}
@@ -254,8 +267,20 @@ def evaluate(split: str, controller_path: Path, cases_dir: Path, cache_dir: Path
     best_base = max((metrics[p]["utility"]["mean"], p) for p in BASELINES if p in metrics and p != "always_abstain")[1]
     corr_ours = [r["correct"] for r in rows["ours"]]
     corr_base = [r["correct"] for r in rows[best_base]]
+    epi_stats = {}
+    for p in EPISTEMIC & set(rows):
+        epi_stats[p] = {
+            "gain_vs_always_answer": paired_cluster_bootstrap([r["reward"] for r in rows[p]], [r["reward"] for r in rows["always_answer"]],
+                                                              [r["group_id"] for r in rows[p]], n_boot, seed),
+            "gain_vs_ours": paired_cluster_bootstrap([r["reward"] for r in rows[p]], [r["reward"] for r in rows["ours"]],
+                                                     [r["group_id"] for r in rows[p]], n_boot, seed),
+            "check_rate": metrics[p]["check_rate"], "contested_rate_among_checked": metrics[p]["contested_rate_among_checked"],
+            "contested_then_abstained": metrics[p]["contested_then_abstained"], "decision_mix": metrics[p]["decision_mix"],
+            "credence_ece": metrics[p].get("calibration", {}).get("ece_cal"),
+        }
     stats = {
         "best_baseline": best_base,
+        "epistemic": epi_stats,
         "mcnemar_ours_vs_best_baseline": mcnemar(corr_ours, corr_base),
         "utility_diff_ours_minus_best_baseline": paired_cluster_bootstrap(
             [r["reward"] for r in rows["ours"]], [r["reward"] for r in rows[best_base]],
@@ -272,7 +297,7 @@ def evaluate(split: str, controller_path: Path, cases_dir: Path, cache_dir: Path
             log_rows.append({
                 "case_id": r["case_id"], "policy": p, "split": split,
                 "signals": {k: v for k, v in r["x"].items() if k != "bias"},
-                "action_probs": r["action_probs"], "action": C.ACTIONS[r["action"]],
+                "action_probs": r["action_probs"], "action": r["action_name"], "credence": r.get("credence"),
                 "verdict": r["verdict"], "cited": r["cited"], "p_correct": r["p_correct"],
                 "gold": r["gold"], "correct": r["correct"], "reward": r["reward"],
                 "llm_calls": r["llm_calls"], "tool_calls": r["tool_calls"], "tokens": r["tokens"], "gpu_s": r["gpu_s"],
@@ -298,6 +323,13 @@ def evaluate(split: str, controller_path: Path, cases_dir: Path, cache_dir: Path
                   f"{100 * seeds_summary['accuracy_mean']:.1f} +/- {100 * seeds_summary['accuracy_std']:.1f} %, coverage "
                   f"{100 * seeds_summary['coverage_mean']:.1f} +/- {100 * seeds_summary['coverage_std']:.1f} %. "
                   f"The shipped controller is the median-val-reward seed ({ctrl.meta.get('chosen_seed')}).\n")
+    for p in [q for q in ("epistemic_eu", "epistemic_rl") if q in epi_stats]:
+        e = epi_stats[p]
+        md.append(f"**{POLICY_LABELS[p]}**: checks {100 * e['check_rate']:.0f}% of cases; among checked, the check disagreed "
+                  f"with the prior in {100 * (e['contested_rate_among_checked'] or 0):.0f}% and the agent abstained on "
+                  f"{e['contested_then_abstained']} of those. Decision mix {', '.join(f'{k} {100 * v:.0f}%' for k, v in e['decision_mix'].items())}. "
+                  f"Utility vs always answer {fmt_ci(e['gain_vs_always_answer'])}; vs ours {fmt_ci(e['gain_vs_ours'])}; "
+                  f"reported-credence ECE {e['credence_ece'] if e['credence_ece'] is None else round(e['credence_ece'], 3)}.\n")
     cards = case_cards(scored, rows["ours"], cases, w, c)
     (out_dir / f"results_{split}.md").write_text("\n".join(md) + "\n" + cards, encoding="utf-8")
     (out_dir / f"cards_{split}.md").write_text(cards, encoding="utf-8")
@@ -355,8 +387,28 @@ def evaluate(split: str, controller_path: Path, cases_dir: Path, cache_dir: Path
                         for p in ("always_answer", "always_verify", "heuristic")}
             figs["cost_frontier"] = F.fig_cost_frontier(ours_front, base_pts, figs_dir / "5_cost_accuracy_frontier.png")
 
+        # 2b phase diagram of the credence-based agent: refit the value of checking per (w, c) on val, apply to this split
+        if epi_eu is not None:
+            from controller.epistemic import EUController as _EU, EpiData as _ED
+
+            ed = _ED(cases_dir, cache_dir, splits=("train", "val", split))
+            ws_e, cs_e = [0.5, 1, 2, 4], [0, 0.025, 0.05, 0.1, 0.2]
+            maj_e = [[None] * len(cs_e) for _ in ws_e]
+            util_e = np.zeros((len(ws_e), len(cs_e)))
+            for i, sw in enumerate(ws_e):
+                for j, sc_ in enumerate(cs_e):
+                    eu_ij = _EU.fit(ed.scored["val"], ed.X1["val"], ed.X2["val"], ed.std1, ed.std2, sw, sc_, ed.K)
+                    dec, _, _ = eu_ij.decide_batch(ed.X1[split], ed.X2[split])
+                    util_e[i, j] = float(np.mean([reward(s, int(d), sw, sc_) for s, d in zip(ed.scored[split], dec)]))
+                    coarse = [C.COARSE[int(d)] for d in dec]
+                    maj_e[i][j] = max(C.ACTIONS, key=coarse.count)
+            figs["phase_diagram_epistemic"] = F.fig_phase_diagram(ws_e, cs_e, maj_e, util_e, figs_dir / "2b_phase_diagram_epistemic.png",
+                                                                  title=f"Credence-based agent on {split}: majority action over (w, c)")
+            stats["phase_diagram_epistemic"] = [{"w": sw, "c": sc_, "utility": float(util_e[i, j]), "majority_action": maj_e[i][j]}
+                                                for i, sw in enumerate(ws_e) for j, sc_ in enumerate(cs_e)]
+
         # 3 grounding test
-        gpols = [p for p in ("always_answer", "always_verify", "heuristic", "ours", "oracle") if p in metrics]
+        gpols = [p for p in ("always_answer", "always_verify", "heuristic", "ours", "epistemic_eu", "oracle") if p in metrics]
         parents_with_twin = {sc.parent_id for sc in scored if sc.variant == "ablated"}
         if parents_with_twin:
             pacc, flip, stub = [], [], []
@@ -388,11 +440,11 @@ def evaluate(split: str, controller_path: Path, cases_dir: Path, cache_dir: Path
         # 7 action mix by case type
         types = ["both_right", "only_verify_right", "only_answer_right", "neither_right"]
         mix = {}
-        for p in ("heuristic", "ours"):
+        for p in [q for q in ("heuristic", "ours", "epistemic_eu") if q in rows]:
             d: dict = {t: Counter() for t in types}
             for sc, r in zip(scored, rows[p]):
-                d[case_type(sc)][C.ACTIONS[r["action"]]] += 1
-            mix[POLICY_LABELS[p]] = {t: dict(v) for t, v in d.items()}
+                d[case_type(sc)][r["action_coarse"]] += 1
+            mix[POLICY_LABELS[p].split(" (")[0]] = {t: dict(v) for t, v in d.items()}
         figs["action_mix"] = F.fig_action_mix(mix, types, figs_dir / "7_action_mix.png")
 
     results = {"split": split, "controller": str(controller_path), "w": w, "c": c, "K": ctrl.K, "llm": ctrl.llm,
@@ -428,10 +480,12 @@ def main(argv=None):
     ap.add_argument("--shortcut-controller", default=None)
     ap.add_argument("--w", type=float, default=None, help="override deployment w (default: the controller's)")
     ap.add_argument("--c", type=float, default=None)
+    ap.add_argument("--epistemic-dir", default=None, help="directory with epistemic_rl.npz / epistemic_eu.npz (default: controller's dir)")
     args = ap.parse_args(argv)
     evaluate(args.split, Path(args.controller), Path(args.cases_dir), Path(args.cache_dir),
              Path(args.figs) if args.figs else None, Path(args.out), Path(args.logs), Path(args.sweep) if args.sweep else None,
-             args.n_boot, args.seed, Path(args.shortcut_controller) if args.shortcut_controller else None, args.w, args.c)
+             args.n_boot, args.seed, Path(args.shortcut_controller) if args.shortcut_controller else None, args.w, args.c,
+             Path(args.epistemic_dir) if args.epistemic_dir else None)
 
 
 if __name__ == "__main__":

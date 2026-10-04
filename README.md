@@ -105,6 +105,39 @@ Cache records are written per case to the Volume (`/art/cache/<split>/<case_id>.
 downloads to `art/cache/`.  Each `cache` invocation also carries the vLLM-side `tok_prob`
 log-prob feature automatically when the backend is vLLM.
 
+## Epistemic discipline (why the agent's "checking" was broken, and the fix)
+
+Measured on the real caches, verification *degraded* belief: when the verifier changed its mind
+the new verdict was right 20-33 % of the time while the discarded prior was right 58-63 %. Almost
+all of the damage was "insufficient evidence" turned into a confident verdict after reading a
+loosely related abstract, and for the 3B model half of the verified verdicts cited nothing the agent
+had actually read. A 3-action controller trained on such a check correctly learns never to check -
+which is a sound decision, but the epistemic claim of the project ("learns when its answer is worth
+checking") then has nothing to stand on. The fix is three rules plus one new component, all in
+`agent/epistemic.py`, `agent/judge.py`, `controller/epistemic.py`:
+
+1. **No evidence, no verdict.** A supported/refuted verdict must cite evidence the agent actually
+   saw: a shown abstract for the provisional answer, a sentence of an opened record for the checked
+   answer. Otherwise the justified output is `insufficient_evidence`. Deterministic and auditable.
+2. **Judgement is separated from search.** The *blind judge* (`modal run modal_app.py::judge --model
+   <m>`; one short call per committed verified verdict) sees only the claim and the cited sentences,
+   with no search narrative, and its reading replaces the verifier's self-assessment. Its top-k token
+   probabilities over the three relation labels give a credence that is a probability distribution.
+3. **A check is evidence, not an oracle.** After checking, a second decision uses what the check
+   revealed (does the new verdict agree with the prior, was it grounded, how confident, what the
+   judge said) and commits the checked verdict, keeps the prior, or abstains (paying the tool cost).
+   Agreement between prior and check is the strongest reliability signal in the data.
+4. **Decisions follow from calibrated credences.** `EUController` fits P(answer right), P(checked
+   verdict right) and P(prior right | check) on validation and takes the action with the highest
+   expected reward under (w, c): "answer iff P(correct) > w/(1+w)" is the literal mechanism and the
+   number the agent reports is its credence. `TwoStageController` is the REINFORCE counterpart with
+   two softmax heads (3 x 6 pre-check, 3 x 13 post-check), trained by the same cache replay.
+
+Evaluation adds the policies *Always check (disciplined verifier)*, *Epistemic agent (two-stage
+RL)* and *Epistemic agent (credence-based)*, a second phase diagram for the credence-based agent,
+check / contested rates, and the ECE of the reported credence. `scripts/run_models.sh <model> judge`
+runs the blind-judge pass and re-evaluates; `art/models/comparison.md` has the cross-model table.
+
 ## Scaling experiment: Gemma 4 26B-A4B vs Llama 3.1 8B vs Llama 3.2 3B
 
 Question: does deciding when to check pay off more for less capable frozen models?  Every

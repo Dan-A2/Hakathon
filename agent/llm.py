@@ -34,6 +34,7 @@ class ChatResult:
     tokens_out: int = 0
     latency_s: float = 0.0
     logprobs: list[tuple[str, float]] | None = None   # output tokens with log-probs (vLLM only)
+    top_logprobs: list[list[tuple[str, float]]] | None = None   # per output token, the top-k alternatives
     model: str = ""
     meta: dict = field(default_factory=dict)
 
@@ -49,7 +50,7 @@ class BaseLLM:
 
     def chat(self, messages: list[dict], *, temperature: float = 0.7, seed: int | None = None,
              max_tokens: int = 700, json_schema: dict | None = None, want_logprobs: bool = False,
-             tag: str | None = None) -> ChatResult:
+             tag: str | None = None, top_k_logprobs: int = 1) -> ChatResult:
         raise NotImplementedError
 
 
@@ -78,7 +79,7 @@ class VLLMClient(BaseLLM):
                              max_retries=3, timeout=180.0)
 
     def chat(self, messages, *, temperature=0.7, seed=None, max_tokens=700, json_schema=None,
-             want_logprobs=False, tag=None) -> ChatResult:
+             want_logprobs=False, tag=None, top_k_logprobs=1) -> ChatResult:
         kwargs: dict[str, Any] = dict(
             model=self.served_name, messages=messages, temperature=temperature, max_tokens=max_tokens,
             extra_body={"chat_template_kwargs": {"enable_thinking": False}},   # thinking off
@@ -90,18 +91,19 @@ class VLLMClient(BaseLLM):
                                          "json_schema": {"name": "kwtc_output", "schema": json_schema}}
         if want_logprobs:
             kwargs["logprobs"] = True
-            kwargs["top_logprobs"] = 1
+            kwargs["top_logprobs"] = max(1, int(top_k_logprobs))
         t0 = time.time()
         resp = self.client.chat.completions.create(**kwargs)
         choice = resp.choices[0]
         text = choice.message.content or ""
-        lps = None
+        lps = tops = None
         if want_logprobs and choice.logprobs and choice.logprobs.content:
             lps = [(t.token, float(t.logprob)) for t in choice.logprobs.content]
+            tops = [[(a.token, float(a.logprob)) for a in (t.top_logprobs or [])] for t in choice.logprobs.content]
         usage = resp.usage
         return ChatResult(text=text, tokens_in=getattr(usage, "prompt_tokens", 0) or 0,
                           tokens_out=getattr(usage, "completion_tokens", 0) or 0,
-                          latency_s=time.time() - t0, logprobs=lps, model=resp.model or self.served_name)
+                          latency_s=time.time() - t0, logprobs=lps, top_logprobs=tops, model=resp.model or self.served_name)
 
 
 class ClaudeClient(BaseLLM):
@@ -117,7 +119,7 @@ class ClaudeClient(BaseLLM):
         self.client = anthropic.Anthropic(max_retries=3, timeout=180.0)
 
     def chat(self, messages, *, temperature=0.7, seed=None, max_tokens=700, json_schema=None,
-             want_logprobs=False, tag=None) -> ChatResult:
+             want_logprobs=False, tag=None, top_k_logprobs=1) -> ChatResult:
         system, msgs = _split_system(messages)
         kwargs: dict[str, Any] = dict(model=self.model_id, max_tokens=max_tokens, messages=msgs,
                                       temperature=temperature)

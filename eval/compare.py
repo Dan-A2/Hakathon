@@ -62,6 +62,27 @@ def model_summary(key: str, art: Path, cases_dir: Path, split: str, n_boot: int)
     rew = {p: _log_rewards(mdir, split, p) for p in ("ours", "always_answer", "heuristic")}
     for base in ("always_answer", "heuristic"):
         out[f"gain_vs_{base}"] = paired_cluster_bootstrap([rew["ours"][i] for i in ids], [rew[base][i] for i in ids], groups, n_boot)
+    # epistemic agent (disciplined verifier + two-stage decisions + credences)
+    dver = np.array([s.dver_correct for s in sc], float)
+    out["disciplined_check_acc"] = cb(dver)
+    out["disciplined_fixes"] = cb((1 - prov) * dver)
+    out["disciplined_breaks"] = cb(prov * (1 - dver))
+    out["judged_share"] = float(np.mean([s.judge is not None for s in sc]))
+    out["epistemic"] = {}
+    for pol in ("epistemic_eu", "epistemic_rl"):
+        if pol in met and (mdir / "logs" / f"{split}_{pol}.jsonl").exists():
+            rp = _log_rewards(mdir, split, pol)
+            e = res["stats"].get("epistemic", {}).get(pol, {})
+            out["epistemic"][pol] = {
+                "utility": met[pol]["utility"], "accuracy": met[pol]["accuracy"], "harmful": met[pol]["harmful"],
+                "coverage": met[pol]["coverage"],
+                "gain_vs_always_answer": paired_cluster_bootstrap([rp[i] for i in ids], [rew["always_answer"][i] for i in ids], groups, n_boot),
+                "gain_vs_ours": paired_cluster_bootstrap([rp[i] for i in ids], [rew["ours"][i] for i in ids], groups, n_boot),
+                "check_rate": met[pol].get("check_rate"), "contested_rate": met[pol].get("contested_rate_among_checked"),
+                "contested_then_abstained": met[pol].get("contested_then_abstained"),
+                "decision_mix": met[pol].get("decision_mix", {}), "credence_ece": e.get("credence_ece"),
+                "fabrication": met[pol]["integrity"].get("fabrication_rate"),
+            }
     return out
 
 
@@ -99,6 +120,29 @@ def render(rows: list[dict], split: str) -> str:
         L.append(f"| {r['label']} | {c['ece_raw_answer']:.3f} | {c['ece_cal_ours']:.3f} | {f(i['always_verify']['fabrication_rate'])} | "
                  f"{f(i['always_answer']['grounding_flip_rate'])} | {f(i['always_answer']['stubborn_rate'])} | "
                  f"{f(i['always_verify']['wrong_reason_rate_doc'])} | {100*r['agree_rate']:.0f} |")
+    L += ["", "## Epistemic agent: disciplined verifier, two-stage decisions, credences", "",
+          "The verifier's output is subject to \"no evidence, no verdict\" (a committed verdict must cite a sentence the agent "
+          "actually read; with a blind-judge pass, an evidence-only reading replaces the verifier's self-assessment), and a "
+          "check is treated as evidence to update on: after checking, the agent commits, keeps its prior, or abstains.", "",
+          "| Model | Verify acc raw -> disciplined % | Disciplined fixes / breaks % | Judged share | Agent | Utility | Gain vs always answer | Gain vs ours | Accuracy % | Harmful % | Checks % | Contested among checked % | Reported-credence ECE |",
+          "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for r in rows:
+        first = True
+        for pol, e in r["epistemic"].items():
+            lab = {"epistemic_eu": "credence-based", "epistemic_rl": "two-stage RL"}[pol]
+            lead = (f"| {r['label']} | {100*r['verify_acc']['mean']:.1f} -> {100*r['disciplined_check_acc']['mean']:.1f} | "
+                    f"{pct(r['disciplined_fixes'])} / {pct(r['disciplined_breaks'])} | {100*r['judged_share']:.0f}% ") if first else "| | | | "
+            first = False
+            ece = "n/a" if e["credence_ece"] is None else f"{e['credence_ece']:.3f}"
+            L.append(lead + f"| {lab} | {fmt_ci(e['utility'])} | {fmt_ci(e['gain_vs_always_answer'])} | {fmt_ci(e['gain_vs_ours'])} | "
+                     f"{pct(e['accuracy'])} | {pct(e['harmful'])} | {100*(e['check_rate'] or 0):.0f} | "
+                     f"{'n/a' if e['contested_rate'] is None else f'{100*e['contested_rate']:.0f}'} | {ece} |")
+        if not r["epistemic"]:
+            L.append(f"| {r['label']} | {100*r['verify_acc']['mean']:.1f} -> {100*r['disciplined_check_acc']['mean']:.1f} | "
+                     f"{pct(r['disciplined_fixes'])} / {pct(r['disciplined_breaks'])} | {100*r['judged_share']:.0f}% | (not trained) | | | | | | | | |")
+    L += ["", "A judged share of 0% means the blind-judge pass has not been run for that model: discipline then rests on "
+          "grounding alone, and the checked verdict is still the verifier's own reading."]
+
     # automatic reading of the hypothesis
     by_size = sorted(rows, key=lambda r: r["params_total"])
     if len(by_size) >= 2:
@@ -167,6 +211,25 @@ def figures(rows: list[dict], out: Path, split: str) -> list[Path]:
     ax.set_xticks(idx, labels)
     ax.legend(loc="best")
     paths.append(F._save(fig, out / "3_controller_gain.png"))
+
+    # 5 epistemic agent vs baselines (utility)
+    if any(r["epistemic"] for r in rows):
+        fig, ax = plt.subplots(figsize=(7.0, 4.2))
+        F._ax(ax, f"Utility by policy and model ({split})", "", "Mean reward (w=1, c=0.05)")
+        series = [("always answer", lambda r: r["utility"]["always_answer"]), ("ours (3-action RL)", lambda r: r["utility"]["ours"]),
+                  ("epistemic agent (credence-based)", lambda r: r["epistemic"].get("epistemic_eu", {}).get("utility")),
+                  ("oracle", lambda r: r["utility"]["oracle"])]
+        wd = 0.2
+        for k, (name, get) in enumerate(series):
+            ds = [get(r) for r in rows]
+            m = np.array([d["mean"] if d else np.nan for d in ds])
+            lo = np.array([d["lo"] if d else np.nan for d in ds]); hi = np.array([d["hi"] if d else np.nan for d in ds])
+            ax.bar(idx + (k - 1.5) * wd, m, width=wd - 0.02, color=F.SERIES[k], edgecolor=F.SURFACE, label=name,
+                   yerr=np.vstack([m - lo, hi - m]), capsize=3, error_kw={"ecolor": F.INK2, "elinewidth": 1})
+        ax.axhline(0, color=F.AXIS, linewidth=1)
+        ax.set_xticks(idx, labels)
+        ax.legend(loc="upper left", fontsize=7.5)
+        paths.append(F._save(fig, out / "5_epistemic_utility.png"))
 
     # 4 calibration
     fig, ax = plt.subplots(figsize=(6.4, 4.2))

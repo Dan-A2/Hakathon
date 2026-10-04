@@ -17,6 +17,22 @@ ANSWER, VERIFY, ABSTAIN = 0, 1, 2
 LABELS = ["supported", "refuted", "insufficient_evidence"]
 COMMIT_LABELS = ("supported", "refuted")           # "S/R" verdicts
 
+# ---- decisions of the epistemic (two-stage) agent -----------------------------------------------
+# 0-2 are the original actions (raw provisional / raw verified / abstain). 3-6 are the disciplined
+# agent's decisions: a verdict must cite evidence the agent actually saw ("no evidence, no verdict"),
+# and a check is evidence to update on, not an oracle that overrides the prior.
+D_ANSWER, CHECK_COMMIT, CHECK_KEEP, CHECK_ABSTAIN = 3, 4, 5, 6
+DECISIONS = ["answer", "verify", "abstain", "answer_grounded", "check_commit", "check_keep_prior", "check_abstain"]
+CHECKED = {VERIFY, CHECK_COMMIT, CHECK_KEEP, CHECK_ABSTAIN}          # decisions that paid for the tool loop
+COARSE = {0: "answer", 1: "verify", 2: "abstain", 3: "answer", 4: "verify", 5: "verify", 6: "verify"}
+STAGE1_NAMES = ["answer_grounded", "check", "abstain"]
+STAGE2_NAMES = ["check_commit", "check_keep_prior", "check_abstain"]
+STAGE2_DECISIONS = [CHECK_COMMIT, CHECK_KEEP, CHECK_ABSTAIN]
+
+# Post-check signals (what the check revealed), standardised like the pre-action signals.
+POST_FEATURE_NAMES = ["bias", "conf_mean", "says_insuff", "suff_mean", "ver_conf", "agree_prior", "check_says_insuff",
+                      "grounded", "opened_any", "tool_frac", "cited_overlap", "judge_available", "judge_conf"]
+
 # The six pre-action signals (bias first). tok_prob is optional (vLLM only).
 FEATURE_NAMES = ["bias", "conf_mean", "agree", "suff_mean", "conf_gap", "says_insuff"]
 TOK_PROB_FEATURE = "tok_prob"

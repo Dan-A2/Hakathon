@@ -73,14 +73,38 @@ class MockLLM(BaseLLM):
 
     # ---- tasks --------------------------------------------------------------------------
     def chat(self, messages, *, temperature=0.7, seed=None, max_tokens=700, json_schema=None,
-             want_logprobs=False, tag=None) -> ChatResult:
+             want_logprobs=False, tag=None, top_k_logprobs=1) -> ChatResult:
         user = self._last_user(messages)
         first_user = next((m["content"] for m in messages if m["role"] == "user"), user)
         claim = self._claim(first_user)
+        if tag == "judge" or "Quoted sentences:" in first_user:
+            return self._judge(messages, claim, first_user, seed)
         if tag == "verify" or any("tool_result" in m["content"] for m in messages if m["role"] == "user") \
                 or "provisional verdict" in first_user:
             return self._verify(messages, claim, first_user, seed)
         return self._provisional(messages, claim, first_user, seed, temperature)
+
+    def _judge(self, messages, claim, user, seed):
+        """Evidence-only reading: overlap decides addressed vs not; negation parity decides direction."""
+        r = _rng(seed, "judge", claim, user[-300:])
+        quotes = re.findall(r"^\[doc \d+, sentence \d+\] (.*)$", user, re.M)
+        s = max((_overlap(claim, q) for q in quotes), default=0.0) + r.normal(0, 0.08)
+        if s < 0.35:
+            rel, conf = "not_addressed", float(np.clip(0.55 + (0.35 - s), 0.5, 0.95))
+        else:
+            rel = "refutes" if _neg_parity(claim) != _neg_parity(" ".join(quotes)) else "supports"
+            if r.random() < 0.15:
+                rel = "supports" if rel == "refutes" else "refutes"
+            conf = float(np.clip(0.5 + s, 0.5, 0.97))
+        obj = {"relation": rel, "confidence": round(conf, 3), "reason": "Mock evidence-only reading."}
+        res = self._result(obj, messages, seed)
+        # fake top-k alternatives at the relation token so credence extraction is exercised
+        toks = re.findall(r'"[^"]*"|[\{\}\[\]:,]|\S+', res.text)
+        others = [o for o in ("supports", "refutes", "not_addressed") if o != rel]
+        rest = (1 - conf)
+        res.top_logprobs = [[(t, 0.0)] if t != f'"{rel}"' else [(f'"{rel}"', float(np.log(conf))), (f'"{others[0]}"', float(np.log(max(rest * 0.6, 1e-6)))),
+                                                                   (f'"{others[1]}"', float(np.log(max(rest * 0.4, 1e-6))))] for t in toks]
+        return res
 
     def _provisional(self, messages, claim, user, seed, temperature):
         r = _rng(seed, "prov", claim, user[-300:])
