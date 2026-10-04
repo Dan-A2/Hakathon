@@ -27,13 +27,13 @@ step "LLM preflight (backend, URL, one real call)"
 $MODAL run modal_app.py::preflight
 
 step "Gate 1: 20 train cases end to end"
-$MODAL run modal_app.py::cache --split train --limit 20
+$MODAL run --detach modal_app.py::cache --split train --limit 20
 $PY -m agent.cache_report --split train
 if [ "$MODE" = "gate" ]; then echo; echo "Gate check done. Re-run with 'all' to build everything."; exit 0; fi
 
 step "full counterfactual cache (critical path)"
-for s in train val test_id test_ood; do $MODAL run modal_app.py::cache --split "$s"; done
-for s in train val; do $MODAL run modal_app.py::cache --split "$s" --cases-dir data/cases_shortcut --out-dir art/cache_shortcut; done
+for s in train val test_id test_ood; do $MODAL run --detach modal_app.py::cache --split "$s"; done
+for s in train val; do $MODAL run --detach modal_app.py::cache --split "$s" --cases-dir data/cases_shortcut --out-dir art/cache_shortcut; done
 $PY -m agent.cache_report --split train
 
 step "train the controller (local NumPy, seconds)"

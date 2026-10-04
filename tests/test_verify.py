@@ -56,3 +56,29 @@ def test_read_record_of_ablated_doc_is_refused_and_logged():
                     '{"final": {"verdict": "insufficient_evidence", "confidence": 0.6, "cited": [], "rationale": ""}}'])
     out = run_verify(llm, CASE, START, RecordStore(DOCS), exclude=[1], K=4)
     assert out["tool_log"][0]["ok"] is False and out["opened_doc_ids"] == []
+
+
+def test_context_overflow_keeps_provisional_and_long_conversations_are_forced_final():
+    from agent import verify as V
+
+    class Overflowing(Scripted):
+        def chat(self, messages, **kw):
+            raise RuntimeError("Error code: 400 - This model's maximum context length is 16384 tokens ...")
+
+    out = run_verify(Overflowing([]), CASE, START, RecordStore(DOCS), exclude=[], K=4)
+    assert out["context_overflow"] and out["used_provisional"] and out["verdict"] == START["verdict"] and out["llm_calls"] == 0
+
+    class Other(Scripted):
+        def chat(self, messages, **kw):
+            raise RuntimeError("connection reset")
+
+    try:
+        run_verify(Other([]), CASE, START, RecordStore(DOCS), exclude=[], K=4)
+        assert False, "non-context errors must propagate"
+    except RuntimeError:
+        pass
+    # a conversation over the character budget forces the final answer on the next turn
+    big = {**CASE, "initial_evidence": [{"doc_id": 2, "title": "Vitamin D", "text": "x" * (V.MAX_CONTEXT_CHARS + 10)}]}
+    llm = Scripted(['{"final": {"verdict": "insufficient_evidence", "confidence": 0.5, "cited": [], "rationale": ""}}'])
+    out = run_verify(llm, big, START, RecordStore(DOCS), exclude=[], K=4)
+    assert out["forced_final"] and out["tool_calls"] == 0 and FORCE_FINAL_MSG in llm.seen

@@ -30,8 +30,8 @@ if [ "$MODE" = "extra" ]; then
   CACHE=art/$($PY -c "from common.models import get; print(get('$MODEL')['cache'])")
   [ -f data/cases/test_climate.jsonl ] || $PY -m data.extra --out data/cases
   $MODAL run modal_app.py::upload_cases --cases-dir data/cases
-  for s in test_climate test_vitc test_ladder; do $MODAL run modal_app.py::cache --model "$MODEL" --split "$s"; done
-  if [ "${KWTC_JUDGE:-1}" = "1" ]; then for s in test_climate test_vitc test_ladder; do $MODAL run modal_app.py::judge --model "$MODEL" --split "$s"; done; fi
+  for s in test_climate test_vitc test_ladder; do $MODAL run --detach modal_app.py::cache --model "$MODEL" --split "$s"; done
+  if [ "${KWTC_JUDGE:-1}" = "1" ]; then for s in test_climate test_vitc test_ladder; do $MODAL run --detach modal_app.py::judge --model "$MODEL" --split "$s"; done; fi
   OUT=art/models/$MODEL
   for s in test_climate test_vitc; do
     $PY -m agent.cache_report --split "$s" --cache-dir "$CACHE"
@@ -44,7 +44,7 @@ fi
 if [ "$MODE" = "judge" ]; then
   CACHE=art/$($PY -c "from common.models import get; print(get('$MODEL')['cache'])")
   OUT=art/models/$MODEL
-  for s in train val test_id test_ood; do $MODAL run modal_app.py::judge --model "$MODEL" --split "$s"; done
+  for s in train val test_id test_ood; do $MODAL run --detach modal_app.py::judge --model "$MODEL" --split "$s"; done
   $PY -m controller.epistemic --w 1 --c 0.05 --seeds 5 --cache-dir "$CACHE" --out-dir "$OUT"
   $PY -m eval.evaluate --split test_id  --controller "$OUT/controller.npz" --cache-dir "$CACHE" --out "$OUT" --logs "$OUT/logs" --figs "$OUT/figs" --sweep "$OUT/sweep.jsonl"
   $PY -m eval.evaluate --split test_ood --controller "$OUT/controller.npz" --cache-dir "$CACHE" --out "$OUT" --logs "$OUT/logs" --figs "$OUT/figs_ood" --sweep "$OUT/sweep.jsonl" --shortcut-controller "$OUT/controller_shortcut.npz"
@@ -57,25 +57,25 @@ mkdir -p "$OUT"
 
 # Keep the Mac awake for the whole run: a sleeping laptop disconnects the client and Modal stops the app.
 if [ -z "${KWTC_CAFFEINATED:-}" ] && command -v caffeinate >/dev/null; then
-  export KWTC_CAFFEINATED=1; exec caffeinate -i "$0" "$@"
+  export KWTC_CAFFEINATED=1; exec caffeinate -dims "$0" "$@"     # no display/idle/disk/system sleep while this runs
 fi
 
 step "$MODEL: preflight against the deployed server (health, one real call)"
 $MODAL run modal_app.py::preflight --model "$MODEL"
 
 step "$MODEL: Gate 1, 20 train cases"
-$MODAL run modal_app.py::cache --model "$MODEL" --split train --limit 20
+$MODAL run --detach modal_app.py::cache --model "$MODEL" --split train --limit 20
 $PY -m agent.cache_report --split train --cache-dir "$CACHE"
 if [ "$MODE" = "gate" ]; then echo; echo "Gate done. If it looks healthy: $0 $MODEL all"; exit 0; fi
 
 step "$MODEL: full counterfactual cache"
-for s in train val test_id test_ood; do $MODAL run modal_app.py::cache --model "$MODEL" --split "$s"; done
-for s in train val; do $MODAL run modal_app.py::cache --model "$MODEL" --shortcut --split "$s"; done
+for s in train val test_id test_ood; do $MODAL run --detach modal_app.py::cache --model "$MODEL" --split "$s"; done
+for s in train val; do $MODAL run --detach modal_app.py::cache --model "$MODEL" --shortcut --split "$s"; done
 $PY -m agent.cache_report --split test_id --cache-dir "$CACHE"
 
 if [ "${KWTC_JUDGE:-1}" = "1" ]; then
   step "$MODEL: blind judge (evidence-only reading of every committed verified verdict)"
-  for s in train val test_id test_ood; do $MODAL run modal_app.py::judge --model "$MODEL" --split "$s"; done
+  for s in train val test_id test_ood; do $MODAL run --detach modal_app.py::judge --model "$MODEL" --split "$s"; done
 fi
 
 step "$MODEL: train controllers (3-action REINFORCE, two-stage epistemic RL, credence-based)"

@@ -119,6 +119,11 @@ checking") then has nothing to stand on. The fix is three rules plus one new com
 1. **No evidence, no verdict.** A supported/refuted verdict must cite evidence the agent actually
    saw: a shown abstract for the provisional answer, a sentence of an opened record for the checked
    answer. Otherwise the justified output is `insufficient_evidence`. Deterministic and auditable.
+   For single-sentence records (HealthVer, Climate-FEVER, VitaminC snippets) any citation of the
+   record counts as citing its sentence, whatever index the model wrote; Gemma numbers from 1, and
+   without this rule 78-84 % of its grounded checks on those sets were wrongly rejected. After
+   changing it, re-run `modal run modal_app.py::judge --model gemma26b --split <split>` so the newly
+   eligible cases get a judge record (the pass is idempotent and only judges the new ones).
 2. **Judgement is separated from search.** The *blind judge* (`modal run modal_app.py::judge --model
    <m>`; one short call per committed verified verdict) sees only the claim and the cited sentences,
    with no search narrative, and its reading replaces the verifier's self-assessment. Its top-k token
@@ -207,6 +212,24 @@ and zero at L1 and L2 while lexical overlap barely changes between L0 and L1.
 
 **`eval/ablation_selection.py`** tests idea 2: training the controllers only on decision-relevant
 cases (first answer and disciplined check disagree in correctness) or up-weighting them.
+
+## Robustness notes (learned from the Modal runs)
+
+* **Bounded tool outputs.** `read_record` returns at most 25 sentences (indices preserved, the rest
+  noted) and sentences are capped at 400 characters; the verify loop re-sends the whole conversation
+  every turn, and a small model reading several 40-60-sentence structured abstracts pushed one prompt
+  past Llama's 16k context. Only 0.2-0.4 % of previously cached cases read such a record, so the
+  existing caches remain comparable.
+* **Context guard.** When the conversation exceeds ~36k characters the loop forces the final answer;
+  if the backend still rejects the prompt as too long, the provisional verdict stands and the record is
+  flagged `context_overflow` instead of failing the case.
+* **Calculator sandbox.** `modal.Sandbox.create(timeout=...)` is the sandbox's lifetime, not the
+  command timeout; it is now 60 s with a 10 s exec limit (a 10 s lifetime expired before `exec` ran).
+* **Long runs.** The scripts use `caffeinate -dims` and `modal run --detach` for cache and judge maps, so
+  a sleeping or disconnected laptop no longer kills a run; finished cases are on the Volume either
+  way and a re-run only merges and downloads them. Modal preemptions ("Container terminated due to
+  preemption") are retried by Modal and are harmless here.
+* **Gemma cites sentences from 1.** See the grounding rule note above.
 
 ## Backends
 

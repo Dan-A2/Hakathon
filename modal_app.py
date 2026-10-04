@@ -197,8 +197,9 @@ def merge(split: str, cache_name: str = "cache") -> str:
 @app.function(image=image, timeout=120)
 def run_calc(code: str) -> str:
     """LLM-written arithmetic never runs on our machines: a Sandbox with no network and a 10 s timeout."""
+    # `timeout` is the sandbox's whole lifetime: it must outlive scheduling + the 10 s exec limit below
     sb = modal.Sandbox.create(app=app, image=modal.Image.debian_slim(python_version="3.12"),
-                              block_network=True, timeout=10)
+                              block_network=True, timeout=60)
     try:
         p = sb.exec("python", "-c", code, timeout=10)
         out = p.stdout.read()

@@ -24,6 +24,17 @@ def test_rule1_no_evidence_no_verdict():
     assert disciplined_verified({**VER, "verdict": "insufficient_evidence"}, set(), set(), STORE, [])["verdict"] == "insufficient_evidence"
 
 
+def test_rule1_single_sentence_record_accepts_any_index():
+    from agent.epistemic import accessible_citations
+
+    one = RecordStore([{"doc_id": 9, "title": "snippet", "sentences": ["Only sentence."]}])
+    for idx in (0, 1, 3, None):
+        cites = accessible_citations([{"doc_id": 9, "sentence": idx}], set(), {"9"}, one, [])
+        assert cites == [{"doc_id": 9, "sentence": 0, "text": "Only sentence."}]
+    assert accessible_citations([{"doc_id": 9, "sentence": 0}], set(), set(), one, []) == []          # never opened -> still ungrounded
+    assert accessible_citations([{"doc_id": 1, "sentence": 7}], set(), {"1"}, STORE, []) == []        # multi-sentence record: index must be valid
+
+
 def test_rule2_judge_overrides_verifier():
     j_not = {"relation": "not_addressed", "confidence": 0.8}
     j_ref = {"relation": "refutes", "confidence": 0.7}

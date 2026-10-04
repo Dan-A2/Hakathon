@@ -12,6 +12,13 @@ from common.config import DEFAULT_K, VERIFY_TEMPERATURE
 from data.records import RecordStore
 
 FORCE_FINAL_MSG = "Tool budget exhausted. Reply with the final answer JSON only."
+MAX_CONTEXT_CHARS = 36_000          # ~9k tokens: force the final answer before the conversation outgrows small context windows
+_CONTEXT_ERRORS = ("maximum context length", "context length", "input_tokens", "prompt is too long", "too many tokens",
+                   "context_length_exceeded", "reduce the length")
+
+
+def is_context_error(e: Exception) -> bool:
+    return any(k in str(e).lower() for k in _CONTEXT_ERRORS)
 RETRY_MSG = "Your reply was not valid JSON for this protocol. Reply with exactly one JSON object: a tool call or a final answer."
 
 
@@ -37,12 +44,20 @@ def run_verify(llm: BaseLLM, case: dict, start: dict, store: RecordStore, exclud
     forced = False
     final = None
     retried = False
+    context_overflow = False
     while True:
-        if tool_calls >= K and not forced:
+        too_long = sum(len(m["content"]) for m in messages) > MAX_CONTEXT_CHARS
+        if (tool_calls >= K or too_long) and not forced:
             forced = True
             messages.append({"role": "user", "content": FORCE_FINAL_MSG})
-        res = llm.chat(messages, temperature=temperature, seed=seed + llm_calls, max_tokens=500, tag="verify",
-                       json_schema=FINAL_STEP_SCHEMA if forced else VERIFY_STEP_SCHEMA)
+        try:
+            res = llm.chat(messages, temperature=temperature, seed=seed + llm_calls, max_tokens=500, tag="verify",
+                           json_schema=FINAL_STEP_SCHEMA if forced else VERIFY_STEP_SCHEMA)
+        except Exception as e:  # noqa: BLE001
+            if not is_context_error(e):
+                raise
+            context_overflow = True                      # the conversation outgrew the model: the provisional verdict stands
+            break
         llm_calls += 1
         tokens_in += res.tokens_in
         tokens_out += res.tokens_out
@@ -85,6 +100,7 @@ def run_verify(llm: BaseLLM, case: dict, start: dict, store: RecordStore, exclud
         "tokens_out": tokens_out,
         "opened_doc_ids": sorted(tools.opened),
         "forced_final": forced,
+        "context_overflow": context_overflow,
         "malformed_turns": malformed_turns,
         "malformed_samples": malformed_samples[:3],
         "used_provisional": used_provisional,

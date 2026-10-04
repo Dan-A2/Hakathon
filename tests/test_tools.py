@@ -35,3 +35,13 @@ def test_tool_runner_respects_exclusions_and_logs():
     assert "error" in tools.call("nonsense", {})
     assert [t["tool"] for t in tools.log] == ["search_records", "read_record", "read_record", "calculate", "nonsense"]
     assert tools.accessible_cited == {"2", "3"}
+
+
+def test_read_record_output_is_bounded():
+    from agent.tools import MAX_READ_SENTENCES, MAX_SENTENCE_CHARS
+
+    long_doc = {"doc_id": 7, "title": "Long", "sentences": [f"Sentence {i} " + "w" * 600 for i in range(60)]}
+    tools = ToolRunner(RecordStore(DOCS + [long_doc]), exclude=[], shown_doc_ids=[], calc_backend="local")
+    rec = tools.call("read_record", {"doc_id": 7})
+    assert len(rec["sentences"]) == MAX_READ_SENTENCES and all(len(s["text"]) <= MAX_SENTENCE_CHARS for s in rec["sentences"])
+    assert rec["sentences"][-1]["i"] == MAX_READ_SENTENCES - 1 and "more sentences" in rec["note"]

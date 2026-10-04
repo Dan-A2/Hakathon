@@ -17,6 +17,10 @@ from common import config as C
 from data.records import RecordStore
 
 MAX_EXPR_LEN = 300
+MAX_READ_SENTENCES = 25        # read_record returns at most this many sentences (indices preserved, rest noted)
+MAX_SENTENCE_CHARS = 400
+MAX_FIRST_SENTENCE_CHARS = 240
+MAX_RESULT_CHARS = 300
 _BIN = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul, ast.Div: op.truediv, ast.FloorDiv: op.floordiv,
         ast.Mod: op.mod, ast.Pow: None}
 _UN = {ast.USub: op.neg, ast.UAdd: op.pos}
@@ -122,8 +126,8 @@ class ToolRunner:
             if name == "search_records":
                 q = str(args.get("query") or args.get("q") or args.get("value") or "")
                 hits = self.store.search(q, k=self.search_k, exclude=self.exclude)
-                result = {"results": [{"doc_id": h["doc_id"], "title": h["title"], "first_sentence": h["first_sentence"]}
-                                      for h in hits]}
+                result = {"results": [{"doc_id": h["doc_id"], "title": h["title"][:MAX_SENTENCE_CHARS],
+                                       "first_sentence": h["first_sentence"][:MAX_FIRST_SENTENCE_CHARS]} for h in hits]}
                 summary = {"query": q[:80], "doc_ids": [h["doc_id"] for h in hits]}
             elif name == "read_record":
                 doc_id = args.get("doc_id", args.get("id", args.get("value")))
@@ -133,14 +137,17 @@ class ToolRunner:
                     summary = {"doc_id": doc_id, "found": False}
                 else:
                     self.opened.add(str(rec["doc_id"]))
-                    result = {"doc_id": rec["doc_id"], "title": rec["title"],
-                              "sentences": [{"i": i, "text": s} for i, s in enumerate(rec["sentences"])]}
+                    sents = rec["sentences"]
+                    result = {"doc_id": rec["doc_id"], "title": rec["title"][:MAX_SENTENCE_CHARS],
+                              "sentences": [{"i": i, "text": s[:MAX_SENTENCE_CHARS]} for i, s in enumerate(sents[:MAX_READ_SENTENCES])]}
+                    if len(sents) > MAX_READ_SENTENCES:
+                        result["note"] = f"{len(sents) - MAX_READ_SENTENCES} more sentences not shown"
                     summary = {"doc_id": rec["doc_id"], "found": True, "n_sentences": len(rec["sentences"])}
             elif name == "calculate":
                 expr = str(args.get("expression") or args.get("expr") or args.get("code") or args.get("value") or "")
                 try:
                     out = modal_calculate(expr) if self.calc_backend == "modal" else safe_calculate(expr)
-                    result = {"result": out.strip()}
+                    result = {"result": out.strip()[:MAX_RESULT_CHARS]}
                 except Exception as e:   # noqa: BLE001 - surface any calculator failure to the model
                     result = {"error": f"calculation failed: {e}"}
                 summary = {"expression": expr[:80], "ok": "result" in result}

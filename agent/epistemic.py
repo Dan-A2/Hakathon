@@ -27,10 +27,16 @@ def accessible_citations(cited: list[dict], shown: set, opened: set, store: Reco
     for c in cited:
         d = str(c.get("doc_id"))
         s = c.get("sentence")
-        if d not in acc or s is None:
+        if d not in acc:
             continue
         rec = store.get(c["doc_id"], exclude=exclude)
-        if rec is None or not (0 <= int(s) < len(rec["sentences"])):
+        if rec is None or not rec["sentences"]:
+            continue
+        if len(rec["sentences"]) == 1:
+            # a single-sentence record (HealthVer, Climate-FEVER, VitaminC snippets): citing the record IS citing the
+            # sentence, whatever index the model wrote (models often number from 1 or copy a listing index)
+            s = 0
+        if s is None or not (0 <= int(s) < len(rec["sentences"])):
             continue
         out.append({"doc_id": c["doc_id"], "sentence": int(s), "text": rec["sentences"][int(s)]})
     return out
