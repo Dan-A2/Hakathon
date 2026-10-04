@@ -51,10 +51,17 @@ def _ink_for(fill_hex_or_rgb) -> str:
     return INK if lum > 0.55 else "#ffffff"
 
 
-def _save(fig, path: Path | str) -> Path:
+def _save(fig, path: Path | str, caption: str | None = None) -> Path:
+    """Save the figure; an optional caption is printed under the plot so the PNG explains itself."""
+    import textwrap
+
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout()
+    if caption:
+        fig.tight_layout(rect=(0, 0.09, 1, 1))
+        fig.text(0.01, 0.012, textwrap.fill(caption, 118), fontsize=7.5, color=INK2, va="bottom", ha="left")
+    else:
+        fig.tight_layout()
     fig.savefig(path, dpi=DPI)
     plt.close(fig)
     return path
@@ -73,7 +80,9 @@ def fig_risk_coverage(curves: dict[str, list[tuple[float, float]]], areas: dict[
     ax.set_xlim(0, 1.02)
     ax.set_ylim(0, 1.02)
     ax.legend(loc="lower left")
-    return _save(fig, path)
+    return _save(fig, path, "How to read: each point is a policy setting; x = share of cases it gives a verdict on, y = accuracy among "
+                            "those. Up and to the right is better. The oracle knows the gold label and is the ceiling; the area under "
+                            "each curve is in the legend.")
 
 
 # 2 ------------------------------------------------------------------ phase diagram
@@ -94,8 +103,9 @@ def fig_phase_diagram(ws: list[float], cs: list[float], majority: list[list[str]
         ax.spines[side].set_visible(False)
     ax.legend(handles=[Patch(facecolor=ACTION_COLOR[a], label=a) for a in C.ACTIONS], loc="upper left",
               bbox_to_anchor=(1.01, 1.0), title="majority action")
-    ax.text(0, -0.9, "cell text = mean reward (utility) on test", color=INK2, fontsize=8)
-    return _save(fig, path)
+    return _save(fig, path, "How to read: rows = penalty for a wrong verdict (w), columns = cost per tool call (c). Colour = the action the "
+                            "agent takes on most test cases under that reward; number = its utility (mean reward). Orange cells are where "
+                            "checking is worth it; green cells are where the reward makes the agent refuse to answer.")
 
 
 # 3 ------------------------------------------------------------------ grounding test
@@ -115,7 +125,9 @@ def fig_grounding(policies: list[str], parent_acc: list[float], flip_rate: list[
     ax.set_xticks(x, policies)
     ax.set_ylim(0, 1.12)
     ax.legend(loc="upper left", ncol=3, bbox_to_anchor=(0, 1.02))
-    return _save(fig, path)
+    return _save(fig, path, "How to read: for each policy, blue = accuracy on claims that still have their supporting abstract; orange = "
+                            "how often, once that abstract is removed, the agent recognises the evidence is gone (higher is better); "
+                            "green = how often it keeps the old verdict anyway with high confidence (lower is better).")
 
 
 # 4 ------------------------------------------------------------------ reliability
@@ -137,9 +149,9 @@ def fig_reliability(bins_raw: list[dict], bins_cal: list[dict], ece_raw: float, 
     ax.set_ylim(0, 1)
     ax.set_aspect("equal")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=1)       # below the plot: never covers the curves
-    ax.text(0.5, -0.30, "marker size = cases in bin; diagonal = perfect calibration", transform=ax.transAxes,
-            ha="center", color=MUTED, fontsize=7.5)
-    return _save(fig, path)
+    return _save(fig, path, "How to read: cases are binned by the probability the agent attached to being right (x); y is how often it "
+                            "actually was. Points on the diagonal are perfectly calibrated; above it = under-confident, below it = "
+                            "over-confident. Marker size = number of cases in the bin. ECE in the legend is the average gap.")
 
 
 # 5 ------------------------------------------------------------------ cost-accuracy frontier
@@ -160,7 +172,9 @@ def fig_cost_frontier(ours: list[tuple[float, float, float]], baselines: dict[st
         ax.scatter([tc], [acc], color=SERIES[(i + 1) % len(SERIES)], s=46, edgecolor=SURFACE, linewidth=1.2, zorder=3, label=name)
         ax.annotate(name, (tc, acc), textcoords="offset points", xytext=(6, -9), fontsize=7.5, color=INK2)
     ax.legend(loc="lower right")
-    return _save(fig, path)
+    return _save(fig, path, "How to read: each blue point is the learned controller trained with a different tool cost c; x = how many "
+                            "tool calls it ends up using per case, y = accuracy. The other points are the fixed policies. The useful "
+                            "frontier is up and to the left: more accuracy for fewer calls.")
 
 
 # 6 ------------------------------------------------------------------ W heatmap
@@ -182,7 +196,8 @@ def fig_w_heatmap(W: np.ndarray, feature_names: list[str], action_names: list[st
     cb.ax.tick_params(length=0, colors=MUTED)
     if reading:
         ax.text(0, 1.18, reading, transform=ax.transAxes, color=INK2, fontsize=8.5, va="bottom")
-    return _save(fig, path)
+    return _save(fig, path, "How to read: signals are standardised, so a weight of +1 means one standard deviation more of that signal adds "
+                            "one unit to that action's score. Red pushes toward the action, blue away from it.")
 
 
 # 7 ------------------------------------------------------------------ action mix by case type
@@ -211,4 +226,6 @@ def fig_action_mix(mix: dict[str, dict[str, dict[str, int]]], case_types: list[s
     axes[0][-1].legend(handles=[Patch(facecolor=ACTION_COLOR[a], label=a) for a in C.ACTIONS], loc="upper left",
                        bbox_to_anchor=(1.01, 1.0), title="action")
     fig.suptitle("Action mix by case type (what verify could have fixed)", x=0.01, ha="left", fontsize=11, fontweight="bold")
-    return _save(fig, path)
+    return _save(fig, path, "How to read: cases are grouped by what would have worked (both answering and checking right, only checking "
+                            "right, only answering right, neither). Each bar shows what the policy actually did on those cases. A good "
+                            "policy checks mostly in the 'only checking right' group and abstains in 'neither'.")

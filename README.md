@@ -160,6 +160,54 @@ Gemma 4 26B-A4B is a mixture of experts with about 4B parameters active per toke
 comparison lists total and active size.  Three models from two families cannot separate size
 from family or training recipe, so the size trend is descriptive.
 
+## Cross-domain epistemics, the evidence ladder, and the selection ablation
+
+In-domain, the epistemic agent works; out of domain (HealthVer) its calibration collapsed. Three
+additions turn that from a dead end into measurements, following the literature on calibration
+under shift (Ovadia et al. 2019; Li et al. 2024 "Few-Shot Recalibration of Language Models"),
+conformal risk control for selective prediction (Angelopoulos & Bates), consistency-based
+uncertainty (Farquhar et al. 2024, semantic entropy; Kadavath et al. 2022, P(True)) and contrastive
+evidence (Schuster et al. 2021, VitaminC; Saakyan et al. 2021, COVID-Fact).
+
+**More domains** (`data/extra.py`, no change to the existing splits):
+
+| Split | Source | Why it is a fair out-of-domain test |
+|---|---|---|
+| `test_climate` | Climate-FEVER (1,535 real climate claims, 5 labelled Wikipedia sentences each) | the agent sees 3 of the 5 sentences, so checking can find the decisive one; "not enough info" claims carry evidence that is present but inconclusive; DISPUTED claims excluded |
+| `test_vitc` | VitaminC test (contrastive Wikipedia revision pairs) | small factual changes flip the label; records = the other sentences of the same page |
+| `test_ladder` | SciFact dev, rationale-removed variants | see the ladder below |
+
+```bash
+python -m data.extra --out data/cases                 # builds only the new splits (300 / 300 / 188 cases)
+scripts/run_models.sh llama8b extra                   # caches + blind judge for the new splits, then the two reports below
+python -m eval.transfer                               # art/models/transfer.md  + art/models/figs_transfer/
+python -m eval.ladder                                 # art/models/ladder.md    + art/models/figs_ladder/
+python -m eval.ablation_selection                     # art/models/ablation_selection.md
+```
+
+**`eval/transfer.py`: does the agent know what it does not know in a new domain?** For every
+model and out-of-domain split: the in-domain credence-based agent zero-shot; *few-shot
+recalibration* (a two-parameter Platt rescaling of its credences fit on k = 25 / 50 / 100 labelled
+cases of the new domain, held-out evaluation, 20 random draws) with an in-sample ceiling;
+*risk control* (on the same k cases, the largest coverage whose 90 % Hoeffding bound on the error
+rate of delivered verdicts is below a target alpha, then the realised error on held-out cases);
+and a *novelty detector* (Mahalanobis distance of the six pre-check signals to the SciFact training
+distribution: AUROC for new-domain vs in-domain cases, calibration error by novelty quartile, and
+the effect of abstaining on cases flagged as novel). If calibration error drops with a few dozen
+labelled cases, the signals transfer and only their scale was wrong.
+
+**`eval/ladder.py`: does confidence track evidence or topic?** Each supported/refuted SciFact
+test claim appears at three evidence levels: L0 full evidence, L1 the gold abstract shown with its
+rationale sentences deleted (topic intact, decisive information gone; label insufficient), L2 the
+abstract removed (the twin). Reports the share of cases where each policy commits to a verdict at
+each level, the credence it attaches, per-claim monotonicity, and *contrastive pairs*: SciFact
+claims citing the same abstract with opposite labels (23 in test, 185 in train), where reading the
+evidence forces different verdicts. Information-theoretic reading: label information is high at L0
+and zero at L1 and L2 while lexical overlap barely changes between L0 and L1.
+
+**`eval/ablation_selection.py`** tests idea 2: training the controllers only on decision-relevant
+cases (first answer and disciplined check disagree in correctness) or up-weighting them.
+
 ## Backends
 
 | `KWTC_LLM_BACKEND` | What it uses | Notes |
@@ -242,18 +290,23 @@ revision (`KWTC_SKIP_HASH_CHECK=1` or `--allow-mismatch` overrides).
 
 `python -m eval.evaluate --split <split> --figs <dir>` writes
 
-* `art/results_<split>.md` / `.json`: headline table (utility, accuracy, selective accuracy,
-  coverage, unnecessary abstention, harmful answers, tool calls, fabrication; 95 % cluster
-  bootstrap CIs over groups; best non-oracle in bold), integrity table (fabrication,
-  right-for-wrong-reason, grounding flip, stubborn, verify flips, unnecessary abstention),
-  cost & calibration table (LLM calls, tool calls, tokens, latency, ECE / Brier raw vs
-  calibrated), McNemar and paired-bootstrap of ours vs the best non-oracle baseline, three
-  case cards (a good verify, a good abstain, a failure we own).
+* `art/results_<split>.md` / `.json`: a self-contained report. It opens with a plain-English
+  "What this report says" summary generated from the numbers, then "How to read this report"
+  (setup, the three actions, how utility is scored, what the brackets mean, one line per
+  policy), then four captioned tables that share one vocabulary (`eval/report.py`): Table 1
+  how good each policy is, Table 2 integrity (cheating, luck, memory), Table 3 cost and
+  calibration, Table 4 what the epistemic agents do; each table ends with a glossary of its
+  columns. Then statistics (paired differences with a verdict on whether they are real,
+  McNemar, seed spread), a figure guide, and three case cards.
 * `art/logs/<split>_<policy>.jsonl`: one line per case in the spec's log format; `gold`,
   `correct`, `reward`, `integrity` are added by the scorer and never exist at deployment.
 * `art/calibrator.npz`: the P(correct) model fit on val.
-* Figures: `1_risk_coverage`, `2_phase_diagram`, `3_grounding_test` (splits with twins),
-  `4_reliability`, `5_cost_accuracy_frontier`, `6_W_heatmap`, `7_action_mix`.
+* Figures: `1_risk_coverage`, `2_phase_diagram`, `2b_phase_diagram_epistemic`,
+  `3_grounding_test` (splits with twins), `4_reliability`, `5_cost_accuracy_frontier`,
+  `6_W_heatmap`, `7_action_mix`. Every figure carries a "How to read" caption in the image.
+* `art/models/comparison.md` (+ `_ood`): the cross-model report with the same structure
+  (summary, how to read, six captioned tables, size-trend reading) and
+  `art/models/figs_compare/`.
 
 Integrity definitions (per policy, from logs + gold): *fabrication* = a cited doc id that was
 never shown or opened; *right for the wrong reason* = correct S/R verdict with no cited

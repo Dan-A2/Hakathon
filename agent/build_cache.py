@@ -110,7 +110,7 @@ def build_split(split: str, cases_dir: Path, cache_dir: Path, llm: BaseLLM, work
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--split", required=True, choices=C.SPLITS + ["all"])
+    ap.add_argument("--split", required=True, choices=C.ALL_SPLITS + ["all"])
     ap.add_argument("--cases-dir", default=str(C.CASES_DIR))
     ap.add_argument("--cache-dir", default=str(C.CACHE_DIR))
     ap.add_argument("--backend", default=None, help="vllm | claude | mock (default: auto)")

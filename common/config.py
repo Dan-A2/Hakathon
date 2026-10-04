@@ -62,7 +62,10 @@ ART_DIR = _env_path("KWTC_ART_DIR", ROOT / "art")
 CACHE_DIR = _env_path("KWTC_CACHE_DIR", ART_DIR / "cache")
 PROMPTS_DIR = ROOT / "agent" / "prompts"
 
-SPLITS = ["train", "val", "test_id", "test_ood"]
+SPLITS = ["train", "val", "test_id", "test_ood"]                                   # the spec's splits
+EXTRA_SPLITS = ["test_climate", "test_vitc", "test_ladder"]                           # data/extra.py: more domains + evidence ladder
+ALL_SPLITS = SPLITS + EXTRA_SPLITS
+OOD_SPLITS = ["test_ood", "test_climate", "test_vitc"]
 
 # ---- LLM backend -------------------------------------------------------------------------
 # KWTC_LLM_BACKEND: "vllm" | "claude" | "mock" (auto-detected when unset)

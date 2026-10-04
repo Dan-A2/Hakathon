@@ -161,7 +161,7 @@ def _ridge(X, y, lam=1.0):
 
 
 def _sigmoid(v):
-    return 1 / (1 + np.exp(-v))
+    return 1 / (1 + np.exp(-np.clip(v, -30, 30)))
 
 
 class EUController:
@@ -198,12 +198,24 @@ class EUController:
         return np.array([C.STAGE2_DECISIONS[j] for j in np.argmax(ev, axis=1)])
 
     # ---- deciding -----------------------------------------------------------------------------
-    def decide_batch(self, X1: np.ndarray, X2: np.ndarray, w: float | None = None) -> tuple[np.ndarray, np.ndarray, dict]:
+    def logits(self, X1: np.ndarray, X2: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        return X1 @ self.beta_a, X2 @ self.beta_cv, X2 @ self.beta_kp
+
+    def decide_batch(self, X1: np.ndarray, X2: np.ndarray, w: float | None = None,
+                     platt: dict | None = None) -> tuple[np.ndarray, np.ndarray, dict]:
+        """Decisions and credences. `platt={'a': (a, b), 'cv': (a, b), 'kp': (a, b)}` recalibrates each credence
+        family as sigmoid(a * logit + b) (few-shot recalibration on a new domain); the in-domain
+        value-of-checking model is kept."""
         w = self.w if w is None else w
-        p_a = _sigmoid(X1 @ self.beta_a)
+        la, lcv, lkp = self.logits(X1, X2)
+        if platt is not None:
+            la = platt["a"][0] * la + platt["a"][1]
+            lcv = platt["cv"][0] * lcv + platt["cv"][1]
+            lkp = platt["kp"][0] * lkp + platt["kp"][1]
+        p_a = _sigmoid(la)
         ev_answer = (1 + w) * p_a - w
         v_check = ev_answer + X1 @ self.beta_check            # expected value of answering plus the predicted gain from checking
-        p_cv, p_kp = _sigmoid(X2 @ self.beta_cv), _sigmoid(X2 @ self.beta_kp)
+        p_cv, p_kp = _sigmoid(lcv), _sigmoid(lkp)
         s2 = self._stage2(p_cv, p_kp, w)
         stage1 = np.argmax(np.stack([ev_answer, v_check, np.zeros_like(p_a)], axis=1), axis=1)
         dec = np.where(stage1 == S1_ANSWER, C.D_ANSWER, np.where(stage1 == S1_ABSTAIN, C.ABSTAIN, s2))

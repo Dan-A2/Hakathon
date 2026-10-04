@@ -194,7 +194,9 @@ def case_cards(scored: list[Scored], rows_ours: list[dict], cases: dict[str, dic
         "A good abstain (both actions would have been wrong)": [r for r in rows_ours if r["action"] == C.ABSTAIN and not r["prov_correct"] and not r["ver_correct"]],
         "A failure we own (committed to a wrong verdict)": [r for r in rows_ours if r["committed"] and not r["correct"]],
     }
-    out = ["### Case cards (policy: ours)", ""]
+    out = [f"## Case cards ({POLICY_LABELS['ours']})", "",
+           "*Three real cases from the logs: one where checking rescued a wrong first answer, one where abstaining avoided two wrong "
+           "answers, and one failure the agent owns. Signals are the six numbers the controller sees before acting.*", ""]
     for title, cands in picks.items():
         out.append(f"#### {title}")
         if not cands:
@@ -305,34 +307,17 @@ def evaluate(split: str, controller_path: Path, cases_dir: Path, cache_dir: Path
             })
         write_jsonl(logs_dir / f"{split}_{p}.jsonl", log_rows)
 
-    # ---- tables + cards
+    # ---- what the epistemic agents did after a contested check (for the report)
+    behaviour = {}
+    for p in [q for q in ("epistemic_eu", "epistemic_rl") if q in rows]:
+        contested = [r for r in rows[p] if r["checked"] and r["contested"]]
+        behaviour[p] = {"n_checked": int(sum(r["checked"] for r in rows[p])), "n_contested": len(contested),
+                        "contested_commit": sum(r["action_name"] == "check_commit" for r in contested),
+                        "contested_keep": sum(r["action_name"] == "check_keep_prior" for r in contested),
+                        "contested_abstain": sum(r["action_name"] == "check_abstain" for r in contested)}
+    judged_share = float(np.mean([sc.judge is not None for sc in scored])) if scored else None
+    has_twins = any(sc.variant == "ablated" for sc in scored)
     ensure_dir(out_dir)
-    md = [f"# Know-When-To-Check results: {split}", "",
-          f"controller `{controller_path}` (w={w}, c={c}, K={ctrl.K}); LLM {ctrl.llm}; {len(scored)} cases in "
-          f"{len({sc.group_id for sc in scored})} groups; {n_boot} cluster-bootstrap resamples.", "",
-          render_headline(metrics, policies, split), "", render_integrity(metrics, policies), "", render_cost(metrics, policies), "",
-          f"**Ours vs best verdict-giving baseline ({POLICY_LABELS[best_base]})**: utility difference "
-          f"{fmt_ci(stats['utility_diff_ours_minus_best_baseline'])}; McNemar on per-case correctness: "
-          f"{stats['mcnemar_ours_vs_best_baseline']['a_right_b_wrong']} ours-only right vs "
-          f"{stats['mcnemar_ours_vs_best_baseline']['a_wrong_b_right']} baseline-only right, p = "
-          f"{stats['mcnemar_ours_vs_best_baseline']['p_value']:.3g}.", "",
-          f"Tuned heuristic thresholds (val): tau_a={heur['tau_a']}, tau_v={heur['tau_v']} (val reward {heur['val_reward']:.3f}).", ""]
-    if seeds_summary:
-        md.append(f"**Ours across {seeds_summary['n_seeds']} training seeds (argmax policy on {split})**: utility "
-                  f"{seeds_summary['utility_mean']:.3f} +/- {seeds_summary['utility_std']:.3f}, accuracy "
-                  f"{100 * seeds_summary['accuracy_mean']:.1f} +/- {100 * seeds_summary['accuracy_std']:.1f} %, coverage "
-                  f"{100 * seeds_summary['coverage_mean']:.1f} +/- {100 * seeds_summary['coverage_std']:.1f} %. "
-                  f"The shipped controller is the median-val-reward seed ({ctrl.meta.get('chosen_seed')}).\n")
-    for p in [q for q in ("epistemic_eu", "epistemic_rl") if q in epi_stats]:
-        e = epi_stats[p]
-        md.append(f"**{POLICY_LABELS[p]}**: checks {100 * e['check_rate']:.0f}% of cases; among checked, the check disagreed "
-                  f"with the prior in {100 * (e['contested_rate_among_checked'] or 0):.0f}% and the agent abstained on "
-                  f"{e['contested_then_abstained']} of those. Decision mix {', '.join(f'{k} {100 * v:.0f}%' for k, v in e['decision_mix'].items())}. "
-                  f"Utility vs always answer {fmt_ci(e['gain_vs_always_answer'])}; vs ours {fmt_ci(e['gain_vs_ours'])}; "
-                  f"reported-credence ECE {e['credence_ece'] if e['credence_ece'] is None else round(e['credence_ece'], 3)}.\n")
-    cards = case_cards(scored, rows["ours"], cases, w, c)
-    (out_dir / f"results_{split}.md").write_text("\n".join(md) + "\n" + cards, encoding="utf-8")
-    (out_dir / f"cards_{split}.md").write_text(cards, encoding="utf-8")
 
     # ---- figures
     figs = {}
@@ -447,6 +432,40 @@ def evaluate(split: str, controller_path: Path, cases_dir: Path, cache_dir: Path
             mix[POLICY_LABELS[p].split(" (")[0]] = {t: dict(v) for t, v in d.items()}
         figs["action_mix"] = F.fig_action_mix(mix, types, figs_dir / "7_action_mix.png")
 
+    # ---- the report: plain-English summary first, then how to read it, then the tables
+    from eval import report as R
+
+    n_groups = len({sc.group_id for sc in scored})
+    mc = stats["mcnemar_ours_vs_best_baseline"]
+    md = [f"# Know-When-To-Check results: {R.model_label(ctrl.llm)} on the {R.SPLIT_NAMES.get(split, split)}", "",
+          f"Controller `{controller_path}` (w = {w:g}, c = {c:g}, K = {ctrl.K}); frozen model `{ctrl.llm.get('model')}` at revision "
+          f"`{ctrl.llm.get('revision')}`; {len(scored)} cases in {n_groups} claim groups; {n_boot} bootstrap resamples.", "",
+          R.plain_summary(metrics, stats, behaviour, policies, split, ctrl.llm, judged_share, has_twins, w), "",
+          R.how_to_read(policies, w, c, ctrl.K, split, len(scored), n_groups, ctrl.llm), "",
+          R.table_headline(metrics, policies, split, _best), "",
+          R.table_integrity(metrics, policies, has_twins), "",
+          R.table_cost(metrics, policies), ""]
+    epi_table = R.table_epistemic(metrics, stats, behaviour, policies, judged_share)
+    if epi_table:
+        md += [epi_table, ""]
+    md += ["## Statistics", "",
+           f"- **Learned controller vs {POLICY_LABELS[best_base]}** (the best baseline that gives verdicts): utility difference "
+           f"{R._sig(stats['utility_diff_ours_minus_best_baseline'])}. McNemar on per-case correctness: {mc['a_right_b_wrong']} cases only "
+           f"the controller got right vs {mc['a_wrong_b_right']} only the baseline got right (p = {mc['p_value']:.3g}). Note that a "
+           f"policy that abstains more will lose this test even when its utility is higher, because abstentions count as wrong.",
+           f"- **Hand-tuned thresholds** chosen on validation: abstain below mean confidence {heur['tau_a']}, check below {heur['tau_v']} "
+           f"or when the two samples disagree (validation utility {heur['val_reward']:.3f})."]
+    if seeds_summary:
+        md.append(f"- **Learned controller across {seeds_summary['n_seeds']} training seeds**: utility {seeds_summary['utility_mean']:.3f} "
+                  f"+/- {seeds_summary['utility_std']:.3f}, accuracy {100 * seeds_summary['accuracy_mean']:.1f} +/- {100 * seeds_summary['accuracy_std']:.1f} %, "
+                  f"answered {100 * seeds_summary['coverage_mean']:.1f} +/- {100 * seeds_summary['coverage_std']:.1f} %. The shipped controller is the "
+                  f"seed with the median validation utility ({ctrl.meta.get('chosen_seed')}).")
+    if figs:
+        md += ["", R.figure_guide({k: str(v) for k, v in figs.items()})]
+    cards = case_cards(scored, rows["ours"], cases, w, c)
+    (out_dir / f"results_{split}.md").write_text("\n".join(md) + "\n\n" + cards, encoding="utf-8")
+    (out_dir / f"cards_{split}.md").write_text(cards, encoding="utf-8")
+
     results = {"split": split, "controller": str(controller_path), "w": w, "c": c, "K": ctrl.K, "llm": ctrl.llm,
                "n_cases": len(scored), "n_groups": len({sc.group_id for sc in scored}), "n_boot": n_boot,
                "policies": policies, "metrics": {p: {k: v for k, v in m.items() if k != "calibration"} |
@@ -467,7 +486,7 @@ def C_skip_hash() -> bool:
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--split", default="test_id", choices=C.SPLITS)
+    ap.add_argument("--split", default="test_id", choices=C.ALL_SPLITS)
     ap.add_argument("--controller", default=str(C.ART_DIR / "controller.npz"))
     ap.add_argument("--figs", default=None, help="directory for figures (omit to skip figures)")
     ap.add_argument("--cases-dir", default=str(C.CASES_DIR))

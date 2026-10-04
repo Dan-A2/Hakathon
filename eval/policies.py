@@ -11,11 +11,7 @@ from scorer.score import Scored, oracle_action, outcome, reward
 
 POLICY_ORDER = ["always_answer", "always_verify", "always_abstain", "heuristic", "ours", "always_check",
                 "epistemic_rl", "epistemic_eu", "oracle", "shortcut"]
-POLICY_LABELS = {"always_answer": "Always answer (original agent)", "always_verify": "Always verify",
-                 "always_abstain": "Always abstain", "heuristic": "Tuned heuristic", "ours": "Ours (trained W)",
-                 "always_check": "Always check (disciplined verifier)", "epistemic_rl": "Epistemic agent (two-stage RL)",
-                 "epistemic_eu": "Epistemic agent (credence-based)",
-                 "oracle": "Oracle (upper bound)", "shortcut": "Shortcut-trained controller"}
+from eval.report import POLICY_LABELS  # one vocabulary for every table and figure
 EPISTEMIC = {"epistemic_rl", "epistemic_eu"}
 
 

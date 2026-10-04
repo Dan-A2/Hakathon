@@ -115,7 +115,7 @@ class ScoreContext:
     def __init__(self, cases_dir: Path | str, judge: dict[str, dict] | None = None):
         self.registry = StoreRegistry(cases_dir)
         self.cases: dict[str, dict] = {}
-        for split in C.SPLITS:
+        for split in C.ALL_SPLITS:
             for c in read_jsonl(Path(cases_dir) / f"{split}.jsonl"):
                 self.cases[c["case_id"]] = c
         self.judge = judge or {}

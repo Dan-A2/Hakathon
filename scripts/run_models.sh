@@ -7,6 +7,7 @@
 #   scripts/run_models.sh llama8b judge          # only the blind-judge pass + retrain + re-evaluate (cache exists)
 #   KWTC_JUDGE=0 scripts/run_models.sh llama8b all   # skip the judge
 #   scripts/run_models.sh compare                # cross-model tables and figures (art/models/)
+#   scripts/run_models.sh llama8b extra          # Climate-FEVER + VitaminC + evidence ladder caches, then transfer/ladder reports
 #
 # Models: gemma26b, llama8b, llama3b (common/models.py).  Llama weights are gated: request access on
 # huggingface.co for the account whose token is in the `huggingface-secret` Modal secret.
@@ -24,6 +25,22 @@ case "${1:-}" in
   *) echo "usage: $0 deploy | compare | <gemma26b|llama8b|llama3b> [gate|all]"; exit 2 ;;
 esac
 MODE=${2:-all}
+if [ "$MODE" = "extra" ]; then
+  # more domains + the evidence ladder: caches, blind judge, then the cross-domain and ladder reports
+  CACHE=art/$($PY -c "from common.models import get; print(get('$MODEL')['cache'])")
+  [ -f data/cases/test_climate.jsonl ] || $PY -m data.extra --out data/cases
+  $MODAL run modal_app.py::upload_cases --cases-dir data/cases
+  for s in test_climate test_vitc test_ladder; do $MODAL run modal_app.py::cache --model "$MODEL" --split "$s"; done
+  if [ "${KWTC_JUDGE:-1}" = "1" ]; then for s in test_climate test_vitc test_ladder; do $MODAL run modal_app.py::judge --model "$MODEL" --split "$s"; done; fi
+  OUT=art/models/$MODEL
+  for s in test_climate test_vitc; do
+    $PY -m agent.cache_report --split "$s" --cache-dir "$CACHE"
+    $PY -m eval.evaluate --split "$s" --controller "$OUT/controller.npz" --cache-dir "$CACHE" --out "$OUT" --logs "$OUT/logs" --figs "$OUT/figs_$s" --sweep "$OUT/sweep.jsonl"
+  done
+  $PY -m eval.transfer && $PY -m eval.ladder
+  for s in test_climate test_vitc; do $PY -m eval.compare --split "$s" || true; done
+  exit 0
+fi
 if [ "$MODE" = "judge" ]; then
   CACHE=art/$($PY -c "from common.models import get; print(get('$MODEL')['cache'])")
   OUT=art/models/$MODEL
