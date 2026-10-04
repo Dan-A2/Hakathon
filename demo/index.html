@@ -494,10 +494,11 @@ function panelSamples(c) {
     ${meterRow("Confidence", smp.confidence)}${meterRow("Evidence sufficiency", smp.sufficiency)}
     <p class="rationale">${esc(smp.rationale)}</p></div>`;
   const chip = (k, v) => `<span class="chip">${esc(k)} <b>${v}</b></span>`;
-  return `<div class="card panel"><div class="panel-h"><span class="k">2</span><h3>Ask the frozen model twice</h3><span class="why">two independent samples → six doubt signals</span></div>
+  return `<div class="card panel"><div class="panel-h"><span class="k">2</span><h3>Ask the frozen model twice</h3><span class="why">two independent samples → 6 features</span></div>
     <div class="grid2">${sample(s[0], 0)}${sample(s[1], 1)}</div>
-    <div class="small muted" style="margin-top:14px">Signals we compute from the two answers:</div>
-    <div class="chips" style="margin-top:6px">${chip("Answers agree", x.agree >= 1 ? "yes" : "no")}${chip("Mean confidence", pct(x.conf_mean))}${chip("Mean evidence sufficiency", pct(x.suff_mean))}${chip("Confidence gap", pct(x.conf_gap))}${chip("One answer says “not enough evidence”", x.says_insuff >= 1 ? "yes" : "no")}${x.tok_prob !== undefined ? chip("Token probability (from the model’s output probabilities)", pct(x.tok_prob)) : ""}</div></div>`;
+    <div class="small muted" style="margin-top:14px">The 6 features the controllers use (credence-based and RL), computed from the two answers:</div>
+    <div class="chips" style="margin-top:6px">${chip("Bias (constant)", "1")}${chip("Answers agree", x.agree >= 1 ? "yes" : "no")}${chip("Mean confidence", pct(x.conf_mean))}${chip("Mean evidence sufficiency", pct(x.suff_mean))}${chip("Confidence gap", pct(x.conf_gap))}${chip("One answer says “not enough evidence”", x.says_insuff >= 1 ? "yes" : "no")}</div>
+    </div>`;
 }
 function panelDecide(c) {
   const ev = c.agent.ev, w = D.w ?? 1, dec = c.agent.decision;
