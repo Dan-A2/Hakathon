@@ -23,6 +23,7 @@ from controller.policy import Controller, feature_matrix
 from controller.train import Data, argmax_actions, run_sweep
 from eval import figures as F
 from eval.policies import EPISTEMIC, POLICY_LABELS, POLICY_ORDER, build_policies, per_case_rows
+from eval.report import SHORT_LABELS
 from eval.stats import cluster_bootstrap, fmt_ci, mcnemar, paired_cluster_bootstrap
 from scorer.score import Scored, case_type, integrity_report, outcome, reward
 
@@ -402,7 +403,7 @@ def evaluate(split: str, controller_path: Path, cases_dir: Path, cache_dir: Path
                 pacc.append(float(np.mean([r["correct"] for r in prow])) if prow else None)
                 flip.append(metrics[p]["integrity"]["grounding_flip_rate"])
                 stub.append(metrics[p]["integrity"]["stubborn_rate"])
-            figs["grounding"] = F.fig_grounding([POLICY_LABELS[p].split(" (")[0] for p in gpols], pacc, flip, stub,
+            figs["grounding"] = F.fig_grounding([SHORT_LABELS[p] for p in gpols], pacc, flip, stub,
                                                 figs_dir / "3_grounding_test.png")
 
         # 4 reliability diagram (ours)
@@ -429,7 +430,7 @@ def evaluate(split: str, controller_path: Path, cases_dir: Path, cache_dir: Path
             d: dict = {t: Counter() for t in types}
             for sc, r in zip(scored, rows[p]):
                 d[case_type(sc)][r["action_coarse"]] += 1
-            mix[POLICY_LABELS[p].split(" (")[0]] = {t: dict(v) for t, v in d.items()}
+            mix[SHORT_LABELS[p].replace("\n", " ")] = {t: dict(v) for t, v in d.items()}
         figs["action_mix"] = F.fig_action_mix(mix, types, figs_dir / "7_action_mix.png")
 
     # ---- the report: plain-English summary first, then how to read it, then the tables

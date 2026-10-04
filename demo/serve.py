@@ -37,8 +37,9 @@ def curated_claims(cases_dir: Path | str, split: str = "test_id", n: int = 10) -
 
 def create_app(controller: str | Path = C.ART_DIR / "controller.npz", calibrator: str | Path | None = None,
                cases_dir: str | Path = C.CASES_DIR, backend: str | None = None, cache_dir: str | Path | None = C.CACHE_DIR,
-               split: str = "test_id") -> FastAPI:
+               split: str = "test_id", report: str | Path | None = None) -> FastAPI:
     app = FastAPI(title="Know-When-To-Check demo")
+    report_path = Path(report) if report else C.ART_DIR / "report" / "index.html"
     state: dict = {"rt": None, "error": None}
     curated, cases = curated_claims(cases_dir, split)
     cached: dict[str, dict] = {}
@@ -59,6 +60,21 @@ def create_app(controller: str | Path = C.ART_DIR / "controller.npz", calibrator
     @app.get("/", response_class=HTMLResponse)
     def index():
         return INDEX.read_text(encoding="utf-8")
+
+    @app.get("/report", response_class=HTMLResponse)
+    def report_page():
+        """The two-minute brief (python -m eval.report_html)."""
+        if not report_path.exists():
+            raise HTTPException(404, "report not built; run python -m eval.report_html and upload_artifacts")
+        return report_path.read_text(encoding="utf-8").replace('href="full.html"', 'href="/report/full"')
+
+    @app.get("/report/full", response_class=HTMLResponse)
+    def report_full():
+        """The full report."""
+        full = report_path.parent / "full.html"
+        if not full.exists():
+            raise HTTPException(404, "full report not built")
+        return full.read_text(encoding="utf-8")
 
     @app.get("/api/health")
     def health():

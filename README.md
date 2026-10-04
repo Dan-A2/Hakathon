@@ -231,6 +231,19 @@ cases (first answer and disciplined check disagree in correctness) or up-weighti
   preemption") are retried by Modal and are harmless here.
 * **Gemma cites sentences from 1.** See the grounding rule note above.
 
+## The final report
+
+```bash
+python -m eval.report_html            # -> art/report/index.html (self-contained, figures embedded, ~2 MB)
+modal run modal_app.py::upload_artifacts && modal deploy modal_app.py   # then open <demo URL>/report
+```
+
+One page for judges: pipeline, data and benchmark design, the three models, method and design
+choices, every hyper-parameter with its rationale, in-domain results, agent behaviour, integrity,
+cross-domain transfer, the evidence ladder, the selection ablation, what to infer (strengths and
+honest limits) and reproducibility. Every number is read from the JSON/Markdown artifacts; nothing
+is typed in by hand. Print to PDF from the browser if a file is needed.
+
 ## Backends
 
 | `KWTC_LLM_BACKEND` | What it uses | Notes |

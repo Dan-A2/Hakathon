@@ -226,7 +226,7 @@ def web():
     from demo.serve import create_app
 
     return create_app(controller=f"{ART}/controller.npz", calibrator=f"{ART}/calibrator.npz",
-                      cases_dir=f"{ART}/data/cases", cache_dir=f"{ART}/cache")
+                      cases_dir=f"{ART}/data/cases", cache_dir=f"{ART}/cache", report=f"{ART}/report/index.html")
 
 
 # ----------------------------------------------------------------------------- local entrypoints
@@ -247,12 +247,18 @@ def upload_cases(cases_dir: str = "data/cases", remote_name: str = ""):
 
 
 @app.local_entrypoint()
-def upload_artifacts(controller: str = "art/controller.npz", calibrator: str = "art/calibrator.npz"):
+def upload_artifacts(controller: str = "art/controller.npz", calibrator: str = "art/calibrator.npz",
+                     report: str = "art/report/index.html"):
     with vol.batch_upload(force=True) as b:
         b.put_file(controller, "/controller.npz")
         if Path(calibrator).exists():
             b.put_file(calibrator, "/calibrator.npz")
-    print("uploaded controller (+calibrator) to kwtc-artifacts:/")
+        if Path(report).exists():
+            b.put_file(report, "/report/index.html")
+        full = Path(report).parent / "full.html"
+        if full.exists():
+            b.put_file(full, "/report/full.html")
+    print("uploaded controller (+calibrator, +report) to kwtc-artifacts:/")
 
 
 @app.local_entrypoint()

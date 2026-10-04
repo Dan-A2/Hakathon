@@ -122,7 +122,7 @@ def fig_grounding(policies: list[str], parent_acc: list[float], flip_rate: list[
         for b, v in zip(bars, vals):
             if v == v:
                 ax.text(b.get_x() + b.get_width() / 2, v + 0.015, f"{v:.2f}", ha="center", va="bottom", fontsize=7, color=INK2)
-    ax.set_xticks(x, policies)
+    ax.set_xticks(x, policies, fontsize=8)
     ax.set_ylim(0, 1.12)
     ax.legend(loc="upper left", ncol=3, bbox_to_anchor=(0, 1.02))
     return _save(fig, path, "How to read: for each policy, blue = accuracy on claims that still have their supporting abstract; orange = "

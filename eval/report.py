@@ -55,6 +55,11 @@ POLICY_LABELS = {
     "oracle": "Oracle (knows the right action; upper bound)",
     "shortcut": "Controller trained on the shortcut data",
 }
+SHORT_LABELS = {   # for figure axes, where the full labels collide
+    "always_answer": "always\nanswer", "always_verify": "raw\nchecker", "always_abstain": "always\nabstain",
+    "heuristic": "hand-tuned\nthresholds", "ours": "learned\ncontroller", "always_check": "disciplined\nchecker",
+    "epistemic_rl": "epistemic\n(two-stage)", "epistemic_eu": "epistemic\n(credence)", "oracle": "oracle", "shortcut": "shortcut-\ntrained",
+}
 POLICY_DESC = {
     "always_answer": "the frozen model's provisional verdict on the three retrieved abstracts, every time. This is the agent before any controller.",
     "always_verify": "runs the tool loop (search, read, calculate; at most K calls) on every case and returns whatever verdict the loop ends with.",
