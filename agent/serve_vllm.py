@@ -3,7 +3,7 @@
     modal deploy agent/serve_vllm.py
     modal run agent/serve_vllm.py          # health check + one chat completion
 
-This follows Modal's vLLM example; only the app name and --max-logprobs differ.  Then
+This follows Modal's vLLM example; only the app name, --max-logprobs and the HF secret differ.  Then
     modal secret create kwtc-llm KWTC_LLM_BACKEND=vllm KWTC_VLLM_URL=<printed URL>
 """
 from __future__ import annotations
@@ -28,6 +28,9 @@ MAX_LOGPROBS = 20          # the tok_prob feature reads the verdict token's log-
 
 hf_cache_vol = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
 vllm_cache_vol = modal.Volume.from_name("vllm-cache", create_if_missing=True)
+# Gemma weights are gated: accept the licence on huggingface.co, then
+#   modal secret create huggingface-secret HF_TOKEN=hf_...
+hf_secret = modal.Secret.from_name("huggingface-secret")
 
 app = modal.App("kwtc-vllm")
 
@@ -46,6 +49,7 @@ VLLM_PORT = 8000
     port=VLLM_PORT,
     target_concurrency=100,
     unauthenticated=True,
+    secrets=[hf_secret],
 )
 class Server:
     @modal.enter()

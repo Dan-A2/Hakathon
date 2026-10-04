@@ -62,22 +62,48 @@ python -m pytest -q
 
 ## Modal
 
+One-time setup (about 10 minutes):
+
 ```bash
-modal deploy agent/serve_vllm.py                 # 1. frozen LLM: vllm serve on an H200, revision-pinned, --max-logprobs 20
-modal run agent/serve_vllm.py                    #    health check + one JSON completion; prints the URL
+. .venv/bin/activate
+modal setup                                       # browser login, writes ~/.modal.toml
+# accept the Gemma licence on huggingface.co, create a read token, then:
+modal secret create huggingface-secret HF_TOKEN=hf_...
+modal deploy agent/serve_vllm.py                  # 1. frozen LLM: vllm serve on an H200, revision-pinned, --max-logprobs 20
+modal run agent/serve_vllm.py                     #    waits for /health, sends one JSON completion with log-probs, prints the URL
 modal secret create kwtc-llm KWTC_LLM_BACKEND=vllm KWTC_VLLM_URL=https://<workspace>--kwtc-vllm-server.modal.run
-#   (fallback: modal secret create kwtc-llm KWTC_LLM_BACKEND=claude ANTHROPIC_API_KEY=sk-ant-...)
-modal run modal_app.py::upload_cases             # data/cases -> Volume kwtc-artifacts
-modal run modal_app.py::cache --split train      # 2. build_case.map() over all cases; then val, test_id, test_ood
-modal run modal_app.py::calc --expression "2**10" # 3. sandboxed calculator smoke test
-modal run modal_app.py::sweep                    # 4. train_one.starmap() over 4 w x 5 c x 5 seeds -> art/sweep.jsonl
-modal run modal_app.py::upload_artifacts         # controller.npz + calibrator.npz -> Volume
-modal deploy modal_app.py                        # 5. live demo URL (FastAPI via @modal.asgi_app)
+#   fallback: modal secret create kwtc-llm KWTC_LLM_BACKEND=claude ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Then either run everything with one script
+
+```bash
+scripts/run_modal.sh gate      # upload data, 20 cases end to end, health report (Gate 1), stop
+scripts/run_modal.sh all       # caches (incl. shortcut variant), training, sweep, evaluation, figures, demo deploy
+```
+
+or step by step:
+
+```bash
+modal run modal_app.py::upload_cases --cases-dir data/cases            # data -> Volume kwtc-artifacts:/data/cases
+modal run modal_app.py::upload_cases --cases-dir data/cases_shortcut
+modal run modal_app.py::cache --split train --limit 20                 # Gate 1
+python -m agent.cache_report --split train                             # JSON validity, signals, tool use (no gold)
+modal run modal_app.py::cache --split train                            # 2. build_case.map(); then val, test_id, test_ood
+modal run modal_app.py::cache --split train --cases-dir data/cases_shortcut --out-dir art/cache_shortcut   # (+ val) policy 7
+python -m controller.train --w 1 --c 0.05 --seeds 5 --out art/controller.npz
+modal run modal_app.py::calc --expression "2**10"                      # 3. sandboxed calculator smoke test
+modal run modal_app.py::sweep                                          # 4. train_one.starmap() over 4 w x 5 c x 5 seeds -> art/sweep.jsonl
+python -m eval.evaluate --split test_id  --controller art/controller.npz --figs art/figs
+python -m eval.evaluate --split test_ood --controller art/controller.npz --figs art/figs_ood --shortcut-controller art/controller_shortcut.npz
+modal run modal_app.py::upload_artifacts                               # controller.npz + calibrator.npz -> Volume
+modal deploy modal_app.py                                              # 5. live demo URL (FastAPI via @modal.asgi_app)
 ```
 
 Cache records are written per case to the Volume (`/art/cache/<split>/<case_id>.json`), so
 `cache` is idempotent and resumable; `merge` produces `<split>.jsonl`, which the entrypoint
-downloads to `art/cache/`.
+downloads to `art/cache/`.  Each `cache` invocation also carries the vLLM-side `tok_prob`
+log-prob feature automatically when the backend is vLLM.
 
 ## Backends
 
