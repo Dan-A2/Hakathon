@@ -47,11 +47,20 @@ def _cases(split: str, cases_name: str = "cases") -> dict[str, dict]:
 
 
 # ----------------------------------------------------------------------------- 2. counterfactual cache
+def _make_llm(llm_spec: dict | None):
+    """The kwtc-llm secret's backend by default; an explicit vLLM server when llm_spec is given (--model)."""
+    from agent.llm import VLLMClient, get_llm
+
+    if not llm_spec:
+        return get_llm()
+    return VLLMClient(url=llm_spec["url"], model_id=llm_spec["model_id"], revision=llm_spec["revision"])
+
+
 @app.function(image=image, volumes={ART: vol}, secrets=[llm_secret], timeout=900, retries=2, max_containers=64)
-def build_case(case_id: str, split: str, K: int = 4, cases_name: str = "cases", cache_name: str = "cache") -> dict:
+def build_case(case_id: str, split: str, K: int = 4, cases_name: str = "cases", cache_name: str = "cache",
+               llm_spec: dict | None = None) -> dict:
     """Provisional x2 + verify for one case. Idempotent: an existing record on the Volume is returned as is."""
     from agent.build_cache import build_case as _build, case_cache_path
-    from agent.llm import get_llm
     from common.io import load_json, save_json
     from data.records import StoreRegistry
 
@@ -59,10 +68,84 @@ def build_case(case_id: str, split: str, K: int = 4, cases_name: str = "cases", 
     if out.exists():
         return load_json(out)
     case = _cases(split, cases_name)[case_id]
-    rec = _build(case, get_llm(), StoreRegistry(f"{ART}/data/{cases_name}"), K=K, calc_backend="modal")
+    try:
+        rec = _build(case, _make_llm(llm_spec), StoreRegistry(f"{ART}/data/{cases_name}"), K=K, calc_backend="modal")
+    except Exception as e:  # noqa: BLE001 - SDK exception types don't deserialize locally; send a plain message
+        raise RuntimeError(f"{case_id}: {type(e).__name__}: {e}"[:600]) from None
     save_json(out, rec, indent=None)
     vol.commit()
     return rec
+
+
+@app.function(image=image, secrets=[llm_secret], timeout=900)
+def check_llm(llm_spec: dict | None = None) -> dict:
+    """Preflight: which backend/URL is selected (secret or --model), and one real JSON call through agent.llm."""
+    import os
+    import time
+    import urllib.error
+    import urllib.request
+
+    from common import config as Cfg
+
+    if llm_spec:
+        info = {"backend": "vllm", "vllm_url": llm_spec["url"], "claude_model": None, "model_id": llm_spec["model_id"]}
+    else:
+        info = {"backend": Cfg.llm_backend(), "vllm_url": os.environ.get("KWTC_VLLM_URL", ""),
+                "claude_model": Cfg.CLAUDE_MODEL if Cfg.llm_backend() == "claude" else None}
+    if info["backend"] == "vllm":
+        url = info["vllm_url"].rstrip("/")
+        if url.endswith("/v1"):
+            url = url[:-3]
+        problems = []
+        if "modal.com/apps" in url:
+            problems.append("this is a Modal dashboard link, not the server URL")
+        if "-dev." in url:
+            problems.append("this is the temporary URL from `modal run`; use the one printed by `modal deploy`")
+        info["url_problems"] = problems
+        deadline, status = time.time() + 600, None          # cold start: weights load in a few minutes
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(url + "/health", timeout=60) as r:
+                    status = r.status
+            except urllib.error.HTTPError as e:
+                status = e.code
+            except Exception as e:  # noqa: BLE001
+                status = repr(e)[:120]
+            if status == 200 or status not in (503, 502, 504) and not isinstance(status, str):
+                break
+            time.sleep(10)
+        info["health"] = status
+        if status != 200:
+            return info
+    try:
+        res = _make_llm(llm_spec).chat([{"role": "user", "content": 'Reply with JSON only: {"ok": true}'}],
+                             temperature=0.0, max_tokens=20, want_logprobs=info["backend"] == "vllm")
+        info.update({"chat_ok": True, "reply": res.text[:120], "logprobs": bool(res.logprobs), "model": res.model})
+    except Exception as e:  # noqa: BLE001
+        info.update({"chat_ok": False, "error": f"{type(e).__name__}: {e}"[:400]})
+    return info
+
+
+def _llm_spec(model: str) -> dict | None:
+    """Resolve a registry model to {url, model_id, revision}; '' means use the kwtc-llm secret."""
+    if not model:
+        return None
+    from common.models import get, server_url
+
+    m = get(model)
+    return {"url": server_url(model), "model_id": m["hf_id"], "revision": m["revision"]}
+
+
+def _preflight(model: str = "") -> None:
+    info = check_llm.remote(_llm_spec(model))
+    print("LLM preflight:", json.dumps(info, indent=2))
+    if not info.get("chat_ok"):
+        raise SystemExit("LLM preflight failed; fix the kwtc-llm secret (see above) before building the cache.")
+
+
+@app.local_entrypoint()
+def preflight(model: str = ""):
+    _preflight(model)
 
 
 @app.function(image=image, volumes={ART: vol}, timeout=1800)
@@ -92,11 +175,11 @@ def run_calc(code: str) -> str:
 
 # ----------------------------------------------------------------------------- 4. reward sweep
 @app.function(image=image, volumes={ART: vol}, cpu=2, timeout=1800)
-def train_one(w: float, c: float, seed: int, use_tok_prob: bool = False) -> dict:
+def train_one(w: float, c: float, seed: int, use_tok_prob: bool = False, cache_name: str = "cache") -> dict:
     from controller.train import train_one as _train_one
 
     vol.reload()
-    return _train_one(w, c, seed, cases_dir=f"{ART}/data/cases", cache_dir=f"{ART}/cache", use_tok_prob=use_tok_prob)
+    return _train_one(w, c, seed, cases_dir=f"{ART}/data/cases", cache_dir=f"{ART}/{cache_name}", use_tok_prob=use_tok_prob)
 
 
 # ----------------------------------------------------------------------------- 5. live demo
@@ -137,24 +220,37 @@ def upload_artifacts(controller: str = "art/controller.npz", calibrator: str = "
 
 
 @app.local_entrypoint()
-def cache(split: str = "train", k: int = 4, limit: int = 0, cases_dir: str = "data/cases", out_dir: str = "art/cache"):
+def cache(split: str = "train", model: str = "", shortcut: bool = False, k: int = 4, limit: int = 0,
+          cases_dir: str = "", out_dir: str = ""):
     """Build the cache for one split with .map(), merge on the Volume, download the jsonl.
 
-    For the shortcut variant: --cases-dir data/cases_shortcut --out-dir art/cache_shortcut
-    (after `modal run modal_app.py::upload_cases --cases-dir data/cases_shortcut`).
+    --model gemma26b|llama8b|llama3b picks the server and the cache dir from common/models.py;
+    without it the kwtc-llm secret is used with art/cache.  --shortcut uses data/cases_shortcut.
     """
     from common.io import read_jsonl
 
+    if model:
+        from common.models import get
+
+        m = get(model)
+        out_dir = out_dir or f"art/{m['cache_shortcut'] if shortcut else m['cache']}"
+    cases_dir = cases_dir or ("data/cases_shortcut" if shortcut else "data/cases")
+    out_dir = out_dir or ("art/cache_shortcut" if shortcut else "art/cache")
+    spec = _llm_spec(model)
     cases_name, cache_name = Path(cases_dir).name, Path(out_dir).name
     ids = [r["case_id"] for r in read_jsonl(f"{cases_dir}/{split}.jsonl")]
     if limit:
         ids = ids[:limit]
+    _preflight(model)
     n_ok = n_err = 0
-    for res in build_case.map(ids, kwargs={"split": split, "K": k, "cases_name": cases_name, "cache_name": cache_name},
+    for res in build_case.map(ids, kwargs={"split": split, "K": k, "cases_name": cases_name, "cache_name": cache_name,
+                                           "llm_spec": spec},
                               return_exceptions=True, order_outputs=False):
         if isinstance(res, Exception):
             n_err += 1
-            print(f"  error: {res!r}")
+            print(f"  error: {str(res).strip().splitlines()[-1][:300]}")
+            if n_ok == 0 and n_err >= 5:
+                raise SystemExit("first 5 cases all failed; stopping (the rest would fail the same way).")
         else:
             n_ok += 1
             if n_ok % 50 == 0:
@@ -165,10 +261,16 @@ def cache(split: str = "train", k: int = 4, limit: int = 0, cases_dir: str = "da
 
 
 @app.local_entrypoint()
-def sweep(seeds: int = 5, out: str = "art/sweep.jsonl", ws: str = "0.5,1,2,4", cs: str = "0,0.025,0.05,0.1,0.2"):
+def sweep(seeds: int = 5, out: str = "", ws: str = "0.5,1,2,4", cs: str = "0,0.025,0.05,0.1,0.2", model: str = ""):
     """100 CPU runs in parallel -> the phase diagram and the cost-accuracy frontier."""
+    cache_name = "cache"
+    if model:
+        from common.models import get
+
+        cache_name = get(model)["cache"]
+    out = out or (f"art/models/{model}/sweep.jsonl" if model else "art/sweep.jsonl")
     grid = [(float(w), float(c), s) for w in ws.split(",") for c in cs.split(",") for s in range(seeds)]
-    rows = list(train_one.starmap(grid))
+    rows = list(train_one.starmap(grid, kwargs={"cache_name": cache_name}))
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     with Path(out).open("w") as f:
         for r in rows:

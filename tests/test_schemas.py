@@ -27,3 +27,12 @@ def test_parse_step_variants():
         parse_step("let me think about this")
     with pytest.raises(MalformedOutput):
         normalize_final({"verdict": "dunno"})
+
+
+def test_gemma_native_tool_call_syntax():
+    a = parse_step('<|tool_call>call:search_records{query:<|"|>SIDS deaths age<|"|>}<tool_call|>')
+    assert a == {"tool": "search_records", "args": {"query": "SIDS deaths age"}}
+    b = parse_step('<|tool_call>call:read_record{doc_id: 12345}<tool_call|>')
+    assert b == {"tool": "read_record", "args": {"doc_id": 12345}}
+    c = parse_step('<|tool_call>call:search_records{query: "0-dimensional biomaterials"}<tool_call|>')
+    assert c["args"]["query"] == "0-dimensional biomaterials"

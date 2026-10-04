@@ -6,7 +6,7 @@ import time
 
 from agent.llm import BaseLLM
 from agent.prompts import fill, format_evidence, load_prompt
-from agent.schemas import MalformedOutput, parse_step
+from agent.schemas import FINAL_STEP_SCHEMA, VERIFY_STEP_SCHEMA, MalformedOutput, parse_step
 from agent.tools import ToolRunner
 from common.config import DEFAULT_K, VERIFY_TEMPERATURE
 from data.records import RecordStore
@@ -33,6 +33,7 @@ def run_verify(llm: BaseLLM, case: dict, start: dict, store: RecordStore, exclud
     messages = build_messages(case, start, K)
     llm_calls = tool_calls = tokens_in = tokens_out = 0
     malformed_turns = 0
+    malformed_samples: list[str] = []
     forced = False
     final = None
     retried = False
@@ -40,7 +41,8 @@ def run_verify(llm: BaseLLM, case: dict, start: dict, store: RecordStore, exclud
         if tool_calls >= K and not forced:
             forced = True
             messages.append({"role": "user", "content": FORCE_FINAL_MSG})
-        res = llm.chat(messages, temperature=temperature, seed=seed + llm_calls, max_tokens=500, tag="verify")
+        res = llm.chat(messages, temperature=temperature, seed=seed + llm_calls, max_tokens=500, tag="verify",
+                       json_schema=FINAL_STEP_SCHEMA if forced else VERIFY_STEP_SCHEMA)
         llm_calls += 1
         tokens_in += res.tokens_in
         tokens_out += res.tokens_out
@@ -50,6 +52,7 @@ def run_verify(llm: BaseLLM, case: dict, start: dict, store: RecordStore, exclud
                 raise MalformedOutput("tool call after budget exhausted")
         except MalformedOutput:
             malformed_turns += 1
+            malformed_samples.append(res.text[:300])
             if retried:            # second failure in a row: the provisional verdict stands
                 break
             retried = True
@@ -83,6 +86,7 @@ def run_verify(llm: BaseLLM, case: dict, start: dict, store: RecordStore, exclud
         "opened_doc_ids": sorted(tools.opened),
         "forced_final": forced,
         "malformed_turns": malformed_turns,
+        "malformed_samples": malformed_samples[:3],
         "used_provisional": used_provisional,
         "latency_s": round(time.time() - t0, 3),
     }

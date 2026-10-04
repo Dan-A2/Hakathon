@@ -105,6 +105,28 @@ Cache records are written per case to the Volume (`/art/cache/<split>/<case_id>.
 downloads to `art/cache/`.  Each `cache` invocation also carries the vLLM-side `tok_prob`
 log-prob feature automatically when the backend is vLLM.
 
+## Scaling experiment: Gemma 4 26B-A4B vs Llama 3.1 8B vs Llama 3.2 3B
+
+Question: does deciding when to check pay off more for less capable frozen models?  Every
+model runs the same cases, prompts, tools and K; only the frozen LLM changes.  Models,
+pinned revisions, GPUs and cache names live in `common/models.py`; each model has its own
+server class in `agent/serve_vllm.py` (app `kwtc-vllm`), its own cache (`art/cache`,
+`art/cache_llama8b`, `art/cache_llama3b`) and its own results in `art/models/<model>/`.
+
+```bash
+# once: the Hugging Face account in `huggingface-secret` must have access to both meta-llama repos
+scripts/run_models.sh deploy            # registers all three servers; GPUs start only on demand
+scripts/run_models.sh llama8b gate      # preflight + 20 cases + health report
+scripts/run_models.sh llama8b all       # caches, controllers, sweep, evaluation
+scripts/run_models.sh llama3b all
+scripts/run_models.sh compare           # art/models/comparison.md (+ _ood) and art/models/figs_compare/
+```
+
+Gemma's results are already in `art/models/gemma26b/` (copied from the first run, not rebuilt).
+Gemma 4 26B-A4B is a mixture of experts with about 4B parameters active per token, so the
+comparison lists total and active size.  Three models from two families cannot separate size
+from family or training recipe, so the size trend is descriptive.
+
 ## Backends
 
 | `KWTC_LLM_BACKEND` | What it uses | Notes |

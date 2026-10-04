@@ -23,6 +23,9 @@ step "upload cases to the Volume"
 $MODAL run modal_app.py::upload_cases --cases-dir data/cases
 $MODAL run modal_app.py::upload_cases --cases-dir data/cases_shortcut
 
+step "LLM preflight (backend, URL, one real call)"
+$MODAL run modal_app.py::preflight
+
 step "Gate 1: 20 train cases end to end"
 $MODAL run modal_app.py::cache --split train --limit 20
 $PY -m agent.cache_report --split train

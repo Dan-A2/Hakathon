@@ -20,6 +20,40 @@ PROVISIONAL_SCHEMA = {
     "additionalProperties": False,
 }
 
+_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "tool": {"type": "string", "enum": ["search_records", "read_record", "calculate"]},
+        "args": {"type": "object",
+                 "properties": {"query": {"type": "string"}, "doc_id": {"type": "integer"}, "expression": {"type": "string"}},
+                 "additionalProperties": False},
+    },
+    "required": ["tool", "args"],
+    "additionalProperties": False,
+}
+FINAL_STEP_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "final": {
+            "type": "object",
+            "properties": {
+                "verdict": {"type": "string", "enum": LABELS},
+                "confidence": {"type": "number"},
+                "cited": {"type": "array", "items": {
+                    "type": "object", "properties": {"doc_id": {"type": "integer"}, "sentence": {"type": "integer"}},
+                    "required": ["doc_id", "sentence"], "additionalProperties": False}},
+                "rationale": {"type": "string"},
+            },
+            "required": ["verdict", "confidence", "cited", "rationale"],
+            "additionalProperties": False,
+        }
+    },
+    "required": ["final"],
+    "additionalProperties": False,
+}
+# One verify turn: a tool call or the final answer (guided decoding keeps Gemma on this JSON protocol).
+VERIFY_STEP_SCHEMA = {"anyOf": [_TOOL_SCHEMA, FINAL_STEP_SCHEMA]}
+
 _VERDICT_SYNONYMS = {
     "supported": "supported", "support": "supported", "supports": "supported", "true": "supported",
     "refuted": "refuted", "refute": "refuted", "refutes": "refuted", "contradict": "refuted",
@@ -135,8 +169,30 @@ def normalize_final(obj: dict) -> dict:
     }
 
 
+_NATIVE_CALL = re.compile(r"<\|tool_call\>\s*call:\s*([A-Za-z_]+)\s*\{(.*?)\}\s*<tool_call\|>", re.S)
+_NATIVE_ARG = re.compile(r'([A-Za-z_]+)\s*:\s*("(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?|true|false)')
+
+
+def parse_native_tool_call(text: str) -> dict | None:
+    """Gemma's built-in syntax, e.g. <|tool_call>call:search_records{query:<|"|>x<|"|>}<tool_call|>."""
+    m = _NATIVE_CALL.search(text or "")
+    if not m:
+        return None
+    body = m.group(2).replace('<|"|>', '"')
+    args = {}
+    for k, v in _NATIVE_ARG.findall(body):
+        try:
+            args[k] = json.loads(v)
+        except json.JSONDecodeError:
+            args[k] = v.strip('"')
+    return {"tool": m.group(1), "args": args}
+
+
 def parse_step(text: str) -> dict:
     """Parse one verify-loop turn: {'tool':..., 'args':...} or {'final': {...}}."""
+    native = parse_native_tool_call(text)
+    if native is not None:
+        return native
     obj = extract_json(text)
     if "final" in obj and isinstance(obj["final"], dict):
         return {"final": normalize_final(obj["final"])}

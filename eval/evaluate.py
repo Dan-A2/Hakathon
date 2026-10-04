@@ -107,11 +107,11 @@ def render_integrity(metrics: dict, policies: list[str]) -> str:
     def pct(v):
         return "n/a" if v is None else f"{100 * v:.1f}"
     lines = ["### Integrity checks (per policy)", "",
-             "| Policy | Fabrication % | Right-for-wrong-reason % | Grounding flip % | Stubborn % | Verify flips wrong->right / right->wrong | Unnec. abstain (of abstained) % |",
+             "| Policy | Fabrication % | Right-for-wrong-reason % (no gold sentence / no gold abstract) | Grounding flip % | Stubborn % | Verify flips wrong->right / right->wrong | Unnec. abstain (of abstained) % |",
              "|---|---|---|---|---|---|---|"]
     for p in policies:
         i = metrics[p]["integrity"]
-        lines.append(f"| {POLICY_LABELS.get(p, p)} | {pct(i['fabrication_rate'])} | {pct(i['wrong_reason_rate'])} | "
+        lines.append(f"| {POLICY_LABELS.get(p, p)} | {pct(i['fabrication_rate'])} | {pct(i['wrong_reason_rate'])} / {pct(i['wrong_reason_rate_doc'])} | "
                      f"{pct(i['grounding_flip_rate'])} | {pct(i['stubborn_rate'])} | {i['verify_wrong_to_right']} / {i['verify_right_to_wrong']} "
                      f"(n={i['n_verified']}) | {pct(i['unnecessary_abstention_among_abstained'])} |")
     return "\n".join(lines)
@@ -250,7 +250,8 @@ def evaluate(split: str, controller_path: Path, cases_dir: Path, cache_dir: Path
         seeds_summary = {"n_seeds": len(per_seed), "per_seed": per_seed,
                          **{f"{k}_mean": float(np.mean([p[k] for p in per_seed])) for k in ("utility", "accuracy", "coverage")},
                          **{f"{k}_std": float(np.std([p[k] for p in per_seed])) for k in ("utility", "accuracy", "coverage")}}
-    best_base = max((metrics[p]["utility"]["mean"], p) for p in BASELINES if p in metrics)[1]
+    # McNemar compares per-case correctness, so the partner must deliver verdicts (always-abstain never does).
+    best_base = max((metrics[p]["utility"]["mean"], p) for p in BASELINES if p in metrics and p != "always_abstain")[1]
     corr_ours = [r["correct"] for r in rows["ours"]]
     corr_base = [r["correct"] for r in rows[best_base]]
     stats = {
@@ -285,7 +286,7 @@ def evaluate(split: str, controller_path: Path, cases_dir: Path, cache_dir: Path
           f"controller `{controller_path}` (w={w}, c={c}, K={ctrl.K}); LLM {ctrl.llm}; {len(scored)} cases in "
           f"{len({sc.group_id for sc in scored})} groups; {n_boot} cluster-bootstrap resamples.", "",
           render_headline(metrics, policies, split), "", render_integrity(metrics, policies), "", render_cost(metrics, policies), "",
-          f"**Ours vs best non-oracle baseline ({POLICY_LABELS[best_base]})**: utility difference "
+          f"**Ours vs best verdict-giving baseline ({POLICY_LABELS[best_base]})**: utility difference "
           f"{fmt_ci(stats['utility_diff_ours_minus_best_baseline'])}; McNemar on per-case correctness: "
           f"{stats['mcnemar_ours_vs_best_baseline']['a_right_b_wrong']} ours-only right vs "
           f"{stats['mcnemar_ours_vs_best_baseline']['a_wrong_b_right']} baseline-only right, p = "

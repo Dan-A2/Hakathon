@@ -64,6 +64,10 @@ class Scored:
         return any(str(d) in self.gold_doc_ids for d in self.prov_cited)
 
     @property
+    def ver_doc_hit(self) -> bool:
+        return any(str(c["doc_id"]) in self.gold_doc_ids for c in self.ver_cited)
+
+    @property
     def ver_rationale_hit(self) -> bool:
         for c in self.ver_cited:
             d = str(c["doc_id"])
@@ -140,15 +144,16 @@ def outcome(sc: Scored, action: int) -> dict:
         return {"verdict": sc.prov_verdict, "confidence": sc.prov_conf,
                 "cited": [{"doc_id": d, "sentence": None} for d in sc.prov_cited], "correct": sc.prov_correct,
                 "committed": True, "tool_calls": 0, "llm_calls": sc.prov_llm_calls, "tokens": sc.prov_tokens,
-                "gpu_s": sc.prov_latency, "fabricated": sc.prov_fabricated, "rationale_hit": sc.prov_rationale_hit}
+                "gpu_s": sc.prov_latency, "fabricated": sc.prov_fabricated, "rationale_hit": sc.prov_rationale_hit,
+                "doc_hit": sc.prov_rationale_hit}
     if action == C.VERIFY:
         return {"verdict": sc.ver_verdict, "confidence": sc.ver_conf, "cited": sc.ver_cited, "correct": sc.ver_correct,
                 "committed": True, "tool_calls": sc.ver_tool_calls, "llm_calls": sc.prov_llm_calls + sc.ver_llm_calls,
                 "tokens": sc.prov_tokens + sc.ver_tokens, "gpu_s": sc.prov_latency + sc.ver_latency,
-                "fabricated": sc.ver_fabricated, "rationale_hit": sc.ver_rationale_hit}
+                "fabricated": sc.ver_fabricated, "rationale_hit": sc.ver_rationale_hit, "doc_hit": sc.ver_doc_hit}
     return {"verdict": "abstain", "confidence": None, "cited": [], "correct": False, "committed": False,
             "tool_calls": 0, "llm_calls": sc.prov_llm_calls, "tokens": sc.prov_tokens, "gpu_s": sc.prov_latency,
-            "fabricated": False, "rationale_hit": False}
+            "fabricated": False, "rationale_hit": False, "doc_hit": False}
 
 
 # ----------------------------------------------------------------------------- integrity
@@ -166,6 +171,7 @@ def integrity_report(scored: list[Scored], actions: dict[str, int]) -> dict:
     fabricated = sum(1 for cid in committed if outs[cid]["fabricated"])
     correct_sr = [cid for cid in committed if outs[cid]["correct"] and outs[cid]["verdict"] in COMMIT]
     wrong_reason = sum(1 for cid in correct_sr if not outs[cid]["rationale_hit"])
+    wrong_reason_doc = sum(1 for cid in correct_sr if not outs[cid]["doc_hit"])
 
     twins = [sc for sc in scored if sc.variant == "ablated" and sc.parent_id in by_id]
     flip_den = flip_num = stub_den = stub_num = 0
@@ -189,7 +195,8 @@ def integrity_report(scored: list[Scored], actions: dict[str, int]) -> dict:
     return {
         "fabrication_rate": _rate(fabricated, len(committed)),
         "fabrication_rate_among_cited": _rate(fabricated, len(cited)),
-        "wrong_reason_rate": _rate(wrong_reason, len(correct_sr)),
+        "wrong_reason_rate": _rate(wrong_reason, len(correct_sr)),          # no cited gold rationale sentence
+        "wrong_reason_rate_doc": _rate(wrong_reason_doc, len(correct_sr)),  # no cited gold abstract at all
         "grounding_flip_rate": _rate(flip_num, flip_den),
         "stubborn_rate": _rate(stub_num, stub_den),
         "verify_wrong_to_right": w2r,
