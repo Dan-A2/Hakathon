@@ -1,0 +1,194 @@
+# Know-When-To-Check
+
+A frozen LLM wrapped in a 3-action controller (**answer / verify / abstain**) trained with
+REINFORCE, shipped with a benchmark that catches the ways such agents cheat: shortcut
+evidence, over-abstention, fabricated citations, and answers that survive the removal of
+their evidence.
+
+Pitch line: *an agent that learns when its own answer is worth checking, and a test bench
+that proves it is not gaming the reward.*
+
+Implements `Know-When-To-Check Final Pipeline Spec.pdf` (Oct 3, 2026).
+
+## What is here
+
+| Stage | Module | Status |
+|---|---|---|
+| Data: SciFact + HealthVer download, BM25 record stores, evidence-ablated twins, leak-free group split | `data/prepare.py`, `data/records.py` | done, run on the real data (train 1028 / val 286 / test-ID 488 / test-OOD 300 cases) |
+| Frozen LLM behind one `chat()` interface: vLLM-on-Modal (Gemma 4 26B-A4B-it), Claude Haiku 4.5, deterministic mock | `agent/llm.py`, `agent/mock_llm.py` | done; real backends need credentials (see below) |
+| Frozen prompts, hashed into the controller | `agent/prompts/` | done |
+| Provisional call x2 -> six signals (+ optional `tok_prob` from vLLM log-probs) | `agent/provisional.py` | done |
+| Verification: JSON tool loop, K=4, every call logged; calculator in a Modal Sandbox (or an AST-restricted local evaluator) | `agent/verify.py`, `agent/tools.py` | done |
+| Counterfactual cache (all LLM calls happen here; idempotent, resumable) | `agent/build_cache.py`, `modal_app.py::cache` | done |
+| Scorer: the only code that reads gold; rewards, oracle, six integrity checks | `scorer/score.py` | done |
+| 3 x 6 softmax controller, REINFORCE replay, 5 seeds, median-seed shipping, `controller.npz` with provenance | `controller/policy.py`, `controller/train.py` | done |
+| Separate calibrated P(correct) (logistic regression on val) with ECE / Brier | `controller/calibrate.py` | done |
+| Seven policies, cluster bootstrap CIs, McNemar, headline tables, per-case logs, case cards, seven figures | `eval/evaluate.py`, `eval/policies.py`, `eval/stats.py`, `eval/figures.py` | done |
+| Reward-design sweep (4 w x 5 c x 5 seeds) -> phase diagram + cost-accuracy frontier | `controller/train.py --sweep`, `modal_app.py::sweep` | done |
+| One-claim inference with the evidence-removal toggle; prompt-hash / model-revision guard | `agent/infer.py` | done |
+| Live demo (FastAPI + one-page UI), locally or on Modal | `demo/serve.py`, `demo/index.html`, `modal_app.py::web` | done |
+| Shortcut-trained controller (stretch, policy 7) | `data/prepare.py --shortcut-variant`, `--shortcut-controller` | done |
+
+Everything above has been run end to end on this machine with the **mock** LLM backend.
+No LLM credentials or Modal token were available here, so the vLLM, Claude and Modal code
+paths are written against the current SDK/API signatures and import-checked, but have not
+been exercised against live services. **Numbers produced with the mock backend are
+meaningless**; every cache record and `controller.npz` carries the backend/model identity so
+mock results cannot be mistaken for real ones.
+
+## Quick start (local)
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+
+python -m data.prepare --out data/cases --shortcut-variant   # downloads SciFact + HealthVer (~10 MB)
+
+# pick the frozen LLM (see "Backends"); with nothing set, the mock is used and says so
+export KWTC_LLM_BACKEND=claude ANTHROPIC_API_KEY=sk-ant-...
+
+python -m agent.build_cache --split all --workers 8          # Stage 1: the counterfactual cache
+python -m controller.train --w 1 --c 0.05 --seeds 5 --out art/controller.npz
+python -m controller.train --sweep --sweep-out art/sweep.jsonl
+python -m eval.evaluate --split test_id  --controller art/controller.npz --figs art/figs
+python -m eval.evaluate --split test_ood --controller art/controller.npz --figs art/figs_ood \
+       --shortcut-controller art/controller_shortcut.npz      # optional policy 7
+python -m agent.infer --claim "Aspirin reduces the risk of myocardial infarction." --controller art/controller.npz --remove-evidence
+python -m demo.serve --port 8000                               # http://127.0.0.1:8000
+python -m pytest -q
+```
+
+`python main.py <prepare|cache|train|sweep|evaluate|infer|demo|test> ...` forwards to the same modules.
+
+## Modal
+
+```bash
+modal deploy agent/serve_vllm.py                 # 1. frozen LLM: vllm serve on an H200, revision-pinned, --max-logprobs 20
+modal run agent/serve_vllm.py                    #    health check + one JSON completion; prints the URL
+modal secret create kwtc-llm KWTC_LLM_BACKEND=vllm KWTC_VLLM_URL=https://<workspace>--kwtc-vllm-server.modal.run
+#   (fallback: modal secret create kwtc-llm KWTC_LLM_BACKEND=claude ANTHROPIC_API_KEY=sk-ant-...)
+modal run modal_app.py::upload_cases             # data/cases -> Volume kwtc-artifacts
+modal run modal_app.py::cache --split train      # 2. build_case.map() over all cases; then val, test_id, test_ood
+modal run modal_app.py::calc --expression "2**10" # 3. sandboxed calculator smoke test
+modal run modal_app.py::sweep                    # 4. train_one.starmap() over 4 w x 5 c x 5 seeds -> art/sweep.jsonl
+modal run modal_app.py::upload_artifacts         # controller.npz + calibrator.npz -> Volume
+modal deploy modal_app.py                        # 5. live demo URL (FastAPI via @modal.asgi_app)
+```
+
+Cache records are written per case to the Volume (`/art/cache/<split>/<case_id>.json`), so
+`cache` is idempotent and resumable; `merge` produces `<split>.jsonl`, which the entrypoint
+downloads to `art/cache/`.
+
+## Backends
+
+| `KWTC_LLM_BACKEND` | What it uses | Notes |
+|---|---|---|
+| `vllm` | OpenAI-compatible vLLM server at `KWTC_VLLM_URL`, served name `KWTC_VLLM_MODEL` (default `llm`) | guided JSON decoding, `seed`, thinking off, per-token log-probs -> `tok_prob` feature (`--tok-prob` at cache build, `--use-tok-prob` at train) |
+| `claude` | Anthropic SDK, `KWTC_CLAUDE_MODEL` (default `claude-haiku-4-5`) | structured outputs for the provisional JSON; no seed parameter (the two samples differ by sampling); no log-probs |
+| `mock` | deterministic lexical-overlap stand-in | for tests and for building the trainer/scorer/figures before the real cache exists |
+
+Auto-detection when unset: vLLM if `KWTC_VLLM_URL` is set, Claude if an Anthropic credential
+is set, otherwise mock (with a warning on stderr).
+
+The calculator tool runs in a Modal Sandbox (`block_network=True`, 10 s timeout) when
+`KWTC_CALC_BACKEND=modal` (set inside the Modal image). Locally it runs an AST-whitelisted
+arithmetic evaluator (`agent/tools.py::safe_calculate`): numbers, operators, `math`
+functions, nothing else.
+
+## Layout
+
+```
+data/prepare.py        download SciFact + HealthVer, BM25 record files, twins, group split  (writes data/cases/)
+data/records.py        RecordStore: BM25 with per-case exclusions (ablated twins), StoreRegistry
+agent/llm.py           one chat() interface: vLLM-on-Modal | Claude API | mock
+agent/prompts/         provisional.txt, verify.txt (hashed, frozen after the cache is built)
+agent/provisional.py   two samples -> provisional answer + six signals
+agent/verify.py        JSON tool loop, K limit, forced final, malformed-JSON retry
+agent/tools.py         search_records / read_record / calculate with a full call log
+agent/build_cache.py   Stage 1 cache builder (local, threaded, resumable)
+agent/infer.py         deployment path for one claim (+ evidence-removal twin run)
+agent/serve_vllm.py    Modal @app.server running vllm serve (Gemma 4 26B-A4B-it, pinned revision)
+controller/policy.py   softmax(W x), z-scoring, controller.npz save/load with hash guards
+controller/train.py    REINFORCE replay, model selection on val, median-seed shipping, sweep
+controller/calibrate.py logistic P(correct), ECE, Brier, reliability bins
+scorer/score.py        gold labels live only here: correctness, rewards, oracle, integrity checks
+eval/evaluate.py       policies, metrics, bootstrap, McNemar, tables, logs, cards, figures
+eval/figures.py        the seven figures
+modal_app.py           cache map, merge, sandboxed calc, sweep starmap, demo endpoint
+demo/serve.py, demo/index.html   live demo
+tests/                 unit tests + an end-to-end mock run on a synthetic corpus
+art/                   outputs: cache/, controller.npz, calibrator.npz, sweep.jsonl, results_*.md/json, logs/, figs/
+```
+
+## Data
+
+* SciFact: 5,183 abstracts; official train (809 claims: 332 S / 173 C / 304 NEI) and dev
+  (300: 124 / 64 / 112). Claims citing the same abstract are joined by union-find; whole
+  groups go to one split (80 % of groups -> train, 20 % -> val). Dev is test-ID.
+* Every SUPPORT/CONTRADICT claim gets an evidence-ablated twin: same claim, gold abstracts
+  removed from that case's accessible records, label `insufficient_evidence`. Twins stay in
+  their parent's split and group.
+* NEI cases get the same top-3 BM25 retrieval as everyone else, so they never carry an empty
+  evidence field (the SciFact shortcut).
+* HealthVer test is the out-of-domain split: initial evidence = the pair's snippet,
+  accessible records = the other snippets under the same question, grouped by question.
+  **Deviation from the spec:** HealthVer test has only 230 unique claims, so 300 cases with
+  one pair per claim is impossible. `prepare.py` takes one pair per claim first (stratified
+  by label, 100 / 100 / 100) and fills the rest with a second, different-evidence pair for 70
+  claims. Set `--ood-n 230` for strictly one pair per claim.
+* `data/cases/gold/` holds labels, gold doc ids and gold rationale sentences; only
+  `scorer/score.py` reads it. Agent inputs never contain gold.
+* Known caveat from the spec, still open: an ablated twin may be supported by a non-cited
+  abstract. Spot-check 30 twins by hand (`data/cases/*.jsonl`, variant `ablated`) and report
+  the error rate.
+* `--shortcut-variant` also writes `data/cases_shortcut/` with raw SciFact semantics (NEI
+  cases see no evidence, S/R cases see their gold abstract, no twins) for policy 7.
+
+## Signals, controller, reward
+
+Features: `bias, conf_mean, agree, suff_mean, conf_gap, says_insuff` (+ `tok_prob` with
+vLLM). Non-bias features are z-scored with train statistics stored next to W.
+Policy: `pi(a|x) = softmax(W x)`, W is 3 x 6, zeros at init; sampling in training, argmax at
+deployment. Reward: answer +1 / -w, verify +1 / -w minus c per tool call, abstain 0. Answer
+beats abstain when P(correct) > w/(1+w). Defaults w = 1, c = 0.05, K = 4.
+
+`controller.npz` stores W, feature mean/std, feature and action names, w, c, K, the prompt
+hash, the LLM model id and revision, the cache hash, the seeds, and the shipped (median)
+seed. `Controller.load` refuses a changed prompt; `agent.infer` refuses a different model or
+revision (`KWTC_SKIP_HASH_CHECK=1` or `--allow-mismatch` overrides).
+
+## Evaluation outputs
+
+`python -m eval.evaluate --split <split> --figs <dir>` writes
+
+* `art/results_<split>.md` / `.json`: headline table (utility, accuracy, selective accuracy,
+  coverage, unnecessary abstention, harmful answers, tool calls, fabrication; 95 % cluster
+  bootstrap CIs over groups; best non-oracle in bold), integrity table (fabrication,
+  right-for-wrong-reason, grounding flip, stubborn, verify flips, unnecessary abstention),
+  cost & calibration table (LLM calls, tool calls, tokens, latency, ECE / Brier raw vs
+  calibrated), McNemar and paired-bootstrap of ours vs the best non-oracle baseline, three
+  case cards (a good verify, a good abstain, a failure we own).
+* `art/logs/<split>_<policy>.jsonl`: one line per case in the spec's log format; `gold`,
+  `correct`, `reward`, `integrity` are added by the scorer and never exist at deployment.
+* `art/calibrator.npz`: the P(correct) model fit on val.
+* Figures: `1_risk_coverage`, `2_phase_diagram`, `3_grounding_test` (splits with twins),
+  `4_reliability`, `5_cost_accuracy_frontier`, `6_W_heatmap`, `7_action_mix`.
+
+Integrity definitions (per policy, from logs + gold): *fabrication* = a cited doc id that was
+never shown or opened; *right for the wrong reason* = correct S/R verdict with no cited
+sentence in the gold rationale (doc-level for the answer action, which cites doc ids only);
+*grounding flip* = on parent/twin pairs with a correct parent, the twin ends
+insufficient_evidence or abstains; *stubborn* = the twin keeps the parent's S/R verdict with
+confidence >= 0.7; *verification flips* = wrong->right and right->wrong counts after verify;
+*unnecessary abstention* = abstained although answer or verify would have been right.
+
+## Fallbacks (from the spec)
+
+| Trigger | What to do |
+|---|---|
+| vLLM not serving | `KWTC_LLM_BACKEND=claude`; drop `--tok-prob` / `--use-tok-prob` |
+| Cache too slow | `--k 2`, `--limit`, `prepare.py --ood-n 150 --no-twins` (twins on test only by hand-editing splits) |
+| Gemma JSON keeps breaking | guided decoding is already on for the provisional call; lower `PROVISIONAL_TEMPERATURE` in `common/config.py` |
+| Controller collapses to one action | check the reward scale, raise `--ent`; the phase diagram shows the collapse as a finding |
+| Demo endpoint fails | `GET /api/cached/<case_id>` replays cache records; the static page still renders them |
+| Shortcut controller not done | skip `--shortcut-controller`; mention the shortcut and the HealthVer drop in one line |

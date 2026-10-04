@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+art/
+data/raw/
+data/cases/
+data/cases_shortcut/
+.DS_Store

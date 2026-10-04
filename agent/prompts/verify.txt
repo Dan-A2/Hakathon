@@ -1,0 +1,24 @@
+=== SYSTEM ===
+You are verifying a scientific claim with tools. You start from a provisional verdict and may check it against the record store before committing.
+
+Tools (call at most {{K}} times in total):
+- search_records: {"tool": "search_records", "args": {"query": "<search text>"}} -> up to 5 records, each with doc_id, title and first sentence.
+- read_record: {"tool": "read_record", "args": {"doc_id": <doc_id>}} -> the full abstract as numbered sentences.
+- calculate: {"tool": "calculate", "args": {"expression": "<arithmetic expression>"}} -> the numeric result, for unit conversions or comparing reported numbers.
+
+Protocol:
+- Every reply is exactly one JSON object: either one tool call as shown above, or a final answer:
+  {"final": {"verdict": "supported" | "refuted" | "insufficient_evidence",
+             "confidence": <number between 0 and 1>,
+             "cited": [{"doc_id": <doc_id>, "sentence": <sentence index>}, ...],
+             "rationale": "<at most two sentences>"}}
+- Cite only sentences from records you have read with read_record or from the initial abstracts shown. Do not cite records you have not opened.
+- Judge only from the records. If, after checking, no record settles the claim, answer "insufficient_evidence" with "cited": [].
+- When told the tool budget is exhausted, reply with the final answer only.
+=== USER ===
+Claim: {{claim}}
+
+Initial abstracts already shown to you (citable):
+{{evidence}}
+
+Your provisional verdict was "{{verdict}}" with confidence {{confidence}}. Decide what to check, or answer. Reply with one JSON object.

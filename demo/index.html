@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Know-When-To-Check</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb; --plane: #f9f9f7; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+    --answer: #2a78d6; --verify: #eb6834; --abstain: #1baf7a; --track: #cde2fb; --meter: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { color-scheme: dark; --surface: #1a1a19; --plane: #0d0d0d; --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+      --answer: #3987e5; --verify: #d95926; --abstain: #199e70; --track: #184f95; --meter: #3987e5; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--plane); color: var(--ink); }
+  header { padding: 18px 28px 8px; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+  header p { margin: 4px 0 0; color: var(--ink2); font-size: 13px; }
+  main { display: grid; grid-template-columns: 380px 1fr; gap: 18px; padding: 12px 28px 32px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .card h2 { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--ink2); text-transform: uppercase; letter-spacing: .04em; }
+  label { display: block; font-size: 12px; color: var(--ink2); margin: 10px 0 4px; }
+  textarea, select { width: 100%; font: inherit; font-size: 14px; padding: 8px; border: 1px solid var(--axis); border-radius: 6px;
+    background: var(--surface); color: var(--ink); }
+  textarea { min-height: 96px; resize: vertical; }
+  .row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+  button { font: inherit; font-size: 14px; padding: 8px 16px; border-radius: 6px; border: 1px solid var(--axis); background: var(--ink); color: var(--surface); cursor: pointer; }
+  button:disabled { opacity: .5; cursor: progress; }
+  .status { font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 16px; }
+  .right { display: grid; gap: 14px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .sample { border: 1px solid var(--grid); border-radius: 8px; padding: 10px 12px; }
+  .sample .v { font-weight: 600; font-size: 15px; }
+  .small { font-size: 12px; color: var(--ink2); }
+  .bar { display: grid; grid-template-columns: 110px 1fr 48px; align-items: center; gap: 10px; margin: 6px 0; font-size: 12px; }
+  .bar .track { height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; }
+  .bar .fill { height: 100%; border-radius: 4px; background: var(--meter); }
+  .bar .val { text-align: right; color: var(--ink2); font-variant-numeric: tabular-nums; }
+  .bar.answer .fill { background: var(--answer); } .bar.verify .fill { background: var(--verify); } .bar.abstain .fill { background: var(--abstain); }
+  .chosen { font-weight: 700; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--axis); font-size: 13px; font-weight: 600; }
+  .cite { border-left: 3px solid var(--grid); padding: 6px 10px; margin: 6px 0; cursor: pointer; font-size: 13px; }
+  .cite .t { display: none; color: var(--ink2); margin-top: 4px; }
+  .cite.open .t { display: block; }
+  .cite .ghost { color: var(--muted); font-style: italic; }
+  .meter { height: 14px; background: var(--track); border-radius: 7px; overflow: hidden; margin: 8px 0 4px; }
+  .meter .fill { height: 100%; background: var(--meter); }
+  .hero { font-size: 36px; font-weight: 600; }
+  details summary { cursor: pointer; color: var(--ink2); font-size: 13px; }
+  pre { font-size: 11px; white-space: pre-wrap; color: var(--ink2); max-height: 220px; overflow: auto; }
+  .removed { color: var(--verify); font-size: 12px; }
+  footer { padding: 0 28px 24px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Know-When-To-Check</h1>
+  <p>A frozen LLM wrapped in a learned answer / verify / abstain controller. Toggle the evidence off and watch the agent change its mind.</p>
+</header>
+<main>
+  <section class="card">
+    <h2>Claim</h2>
+    <label for="curated">Curated test claims (each has an evidence-ablated twin)</label>
+    <select id="curated"><option value="">— type your own claim below —</option></select>
+    <label for="claim">Claim text</label>
+    <textarea id="claim" placeholder="e.g. Aspirin reduces the risk of myocardial infarction in patients with diabetes."></textarea>
+    <div class="row">
+      <label class="toggle" style="margin:0"><input type="checkbox" id="remove"> Remove supporting evidence</label>
+    </div>
+    <div class="row"><button id="run">Run agent</button><span class="small" id="mode"></span></div>
+    <div class="status" id="status"></div>
+    <p class="small">With a curated claim, the toggle runs the case's twin: the gold abstracts are removed from the record store. With a free-text claim, it removes the abstracts the agent cited and re-runs.</p>
+  </section>
+
+  <section class="right">
+    <div class="two">
+      <div class="card"><h2>Provisional sample A</h2><div id="sampleA" class="sample small">—</div></div>
+      <div class="card"><h2>Provisional sample B</h2><div id="sampleB" class="sample small">—</div></div>
+    </div>
+    <div class="two">
+      <div class="card"><h2>Signals</h2><div id="signals" class="small">—</div></div>
+      <div class="card"><h2>Action preference <span class="small">(controller probabilities, not confidence)</span></h2><div id="actions" class="small">—</div></div>
+    </div>
+    <div class="two">
+      <div class="card"><h2>Final verdict</h2><div id="final">—</div></div>
+      <div class="card"><h2>Calibrated P(correct)</h2><div id="pcorrect">—</div></div>
+    </div>
+    <div class="card"><details><summary>Tool log and raw result</summary><pre id="raw"></pre></details></div>
+  </section>
+</main>
+<footer id="foot"></footer>
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (x, d = 2) => (x === null || x === undefined) ? "—" : Number(x).toFixed(d);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function loadClaims() {
+  try {
+    const r = await fetch("/api/claims"); const list = await r.json();
+    for (const c of list) { const o = document.createElement("option"); o.value = c.case_id; o.textContent = c.claim; $("curated").appendChild(o); }
+  } catch (e) { $("status").textContent = "could not load curated claims: " + e; }
+  try { const h = await (await fetch("/api/health")).json();
+    $("foot").textContent = h.ok ? `frozen LLM: ${h.llm.backend} / ${h.llm.model} (${h.llm.revision}) · controller w=${h.controller.w} c=${h.controller.c} K=${h.controller.K} · prompt ${h.controller.prompt_hash}` : `agent not ready: ${h.error}`;
+  } catch (e) {}
+}
+$("curated").addEventListener("change", () => { const o = $("curated").selectedOptions[0]; if (o && o.value) $("claim").value = o.textContent; });
+$("claim").addEventListener("input", () => { $("curated").value = ""; });
+
+function bar(cls, name, v, chosen) {
+  const pct = Math.max(0, Math.min(1, v ?? 0)) * 100;
+  return `<div class="bar ${cls} ${chosen ? "chosen" : ""}"><span>${esc(name)}${chosen ? " ◀" : ""}</span><div class="track"><div class="fill" style="width:${pct}%"></div></div><span class="val">${fmt(v)}</span></div>`;
+}
+function sample(s) {
+  if (!s) return "—";
+  return `<div class="v">${esc(s.verdict)}</div><div>confidence ${fmt(s.confidence)} · sufficiency ${fmt(s.evidence_sufficiency)}</div>
+    <div>cited: ${s.cited_doc_ids.length ? s.cited_doc_ids.join(", ") : "none"}${s.parse_ok ? "" : " · <b>malformed JSON (fallback)</b>"}</div><div>${esc(s.rationale)}</div>`;
+}
+function render(payload) {
+  const r = payload.result;
+  $("sampleA").innerHTML = sample(r.samples[0]); $("sampleB").innerHTML = sample(r.samples[1]);
+  $("signals").innerHTML = Object.entries(r.signals).filter(([k, v]) => v !== null).map(([k, v]) => bar("", k, v, false)).join("");
+  $("actions").innerHTML = Object.entries(r.action_preference).map(([k, v]) => bar(k, k, v, k === r.action)).join("") +
+    `<div style="margin-top:8px">chosen action: <span class="badge">${esc(r.action)}</span></div>`;
+  const f = r.final;
+  let html = `<div><span class="badge">${esc(f.verdict)}</span> ${f.confidence !== null && f.confidence !== undefined ? `<span class="small">verbalised confidence ${fmt(f.confidence)}</span>` : ""}</div>`;
+  if (f.verdict === "abstain") {
+    html += `<p class="small">${esc(f.rationale)}</p><p class="small">provisional verdicts: ${f.provisional_verdicts.map(p => `${esc(p.verdict)} (${fmt(p.confidence)})`).join(" / ")} · records seen: ${f.records_seen.join(", ")}</p>`;
+  } else {
+    html += `<p class="small">${esc(f.rationale)}</p>`;
+    html += f.cited.length ? f.cited.map((c, i) => `<div class="cite" data-i="${i}"><div>[${esc(c.doc_id)}] ${c.sentence !== null && c.sentence !== undefined ? "sentence " + c.sentence : "document-level"} · ${esc(c.title || "")}${c.accessible ? "" : ' <span class="ghost">(not in this case\'s record store)</span>'}</div><div class="t">${esc(c.text || "(no sentence text)")}</div></div>`).join("") : `<p class="small">no citations</p>`;
+  }
+  if (payload.removed_doc_ids && payload.removed_doc_ids.length) html += `<p class="removed">evidence removed from the record store: ${payload.removed_doc_ids.join(", ")}</p>`;
+  $("final").innerHTML = html;
+  for (const el of document.querySelectorAll(".cite")) el.addEventListener("click", () => el.classList.toggle("open"));
+  if (r.p_correct === null || r.p_correct === undefined) {
+    $("pcorrect").innerHTML = `<div class="hero">—</div><div class="small">${r.action === "abstain" ? "no verdict was delivered" : "no calibrator loaded"}</div>`;
+  } else {
+    $("pcorrect").innerHTML = `<div class="hero">${(r.p_correct * 100).toFixed(0)}%</div><div class="meter"><div class="fill" style="width:${r.p_correct * 100}%"></div></div><div class="small">logistic calibrator fit on validation (signals + action); separate from the controller</div>`;
+  }
+  $("raw").textContent = JSON.stringify({tool_log: r.tool_log, llm_calls: r.llm_calls, tool_calls: r.tool_calls, tokens: r.tokens, latency_s: r.latency_s, excluded_doc_ids: r.excluded_doc_ids, initial_evidence: r.initial_evidence, with_evidence: payload.with_evidence ? {action: payload.with_evidence.action, verdict: payload.with_evidence.final.verdict} : undefined}, null, 2);
+  $("status").textContent = `done in ${r.latency_s}s · ${r.llm_calls} LLM calls · ${r.tool_calls} tool calls`;
+}
+$("run").addEventListener("click", async () => {
+  const body = { claim: $("claim").value, case_id: $("curated").value || null, remove_evidence: $("remove").checked };
+  $("run").disabled = true; $("status").textContent = "running the frozen agent…"; $("mode").textContent = body.case_id ? "curated case" : "live claim";
+  try {
+    const res = await fetch("/api/infer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(await res.text());
+    render(await res.json());
+  } catch (e) { $("status").textContent = "error: " + e.message; }
+  $("run").disabled = false;
+});
+loadClaims();
+</script>
+</body>
+</html>

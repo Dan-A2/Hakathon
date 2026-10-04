@@ -1,0 +1,16 @@
+[project]
+name = "kwtc"
+version = "0.1.0"
+description = "Know-When-To-Check: a frozen LLM wrapped in a REINFORCE-trained answer/verify/abstain controller, with a shortcut-proof benchmark"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26", "matplotlib>=3.8", "rank_bm25>=0.2.2", "anthropic>=1.0", "openai>=1.0",
+  "fastapi>=0.110", "uvicorn[standard]>=0.29", "pydantic>=2", "modal>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
